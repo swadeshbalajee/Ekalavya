@@ -60,7 +60,8 @@ if (-not (Test-Path .local\postgres\PG_VERSION)) {
     Step 'Initializing PostgreSQL in .local\postgres'
     & "$bin\initdb.exe" -D .local\postgres -U scholarmotion -A trust -E UTF8 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'initdb failed.' }
-    & "$bin\pg_ctl.exe" -D .local\postgres -l .local\logs\postgres.log -o '-h 127.0.0.1 -p 5432' -w start | Out-Null
+    # Not piped: the server inherits pg_ctl's stdout, so a pipe would never close.
+    & "$bin\pg_ctl.exe" -D .local\postgres -l .local\logs\postgres.log -o '-h 127.0.0.1 -p 5432' -w start
     & "$bin\createdb.exe" -h 127.0.0.1 -p 5432 -U scholarmotion scholarmotion
     $created = $LASTEXITCODE
     & "$bin\pg_ctl.exe" -D .local\postgres -w stop -m fast | Out-Null
