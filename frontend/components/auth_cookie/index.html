@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body style="margin: 0">
+    <script>
+      const COOKIE_NAME = "scholarmotion_session";
+
+      function setCookie(token) {
+        const secure = window.location.protocol === "https:" ? "; Secure" : "";
+        const value = encodeURIComponent(token);
+        document.cookie = `${COOKIE_NAME}=${value}; Path=/; Max-Age=604800; SameSite=Lax${secure}`;
+      }
+
+      function clearCookie() {
+        const secure = window.location.protocol === "https:" ? "; Secure" : "";
+        document.cookie = `${COOKIE_NAME}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+      }
+
+      function send(type, fields = {}) {
+        window.parent.postMessage(
+          { isStreamlitMessage: true, type, ...fields },
+          "*"
+        );
+      }
+
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (message?.type !== "streamlit:render") return;
+
+        const { action, token, request_id: requestId } = message.args || {};
+        if (action === "save" && token && requestId) {
+          setCookie(token);
+          send("streamlit:setComponentValue", {
+            value: { request_id: requestId, saved: true },
+            dataType: "json",
+          });
+        } else if (action === "clear" && requestId) {
+          clearCookie();
+          send("streamlit:setComponentValue", {
+            value: { request_id: requestId, cleared: true },
+            dataType: "json",
+          });
+        }
+      });
+
+      send("streamlit:componentReady", { apiVersion: 1 });
+      send("streamlit:setFrameHeight", { height: 1 });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+name: scholarmotion
+channels:
+  - conda-forge
+dependencies:
+  # Manim 0.18 supports Python through 3.11.
+  - python=3.11
+  - pip
+  - ffmpeg
+  - cairo
+  - pango
+  - manim
+  - postgresql
+  - pip:
+      - -e .[dev,llm,embeddings,alignment]

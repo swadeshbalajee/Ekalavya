@@ -1,0 +1,35 @@
+# --- Secrets ---
+.env
+.env.local
+
+# --- Python / tool caches ---
+.venv/
+.manim-pkgconfig/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- Local services, databases and logs (created by scripts/setup-local.ps1) ---
+.local/
+qdrant-storage/
+*.db
+*.log
+
+# --- Generated media, chats' artifacts and supplied sources ---
+projects/
+data/
+evaluation/
+media/
+snapshots/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
