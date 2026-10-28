@@ -15,16 +15,33 @@ from typing import Annotated
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from scholarmotion.agents.chat_title import title_for_request
 from scholarmotion.agents.learner_profiler import DEFAULT_VIDEO_DURATION_MINUTES
 from scholarmotion.agents.lesson_preparation import prepare_lesson
 from scholarmotion.api.admin import require_admin
 from scholarmotion.api.capabilities import create_capability_router
+from scholarmotion.api.knowledge import KNOWLEDGE_PREFIX, create_knowledge_router
+from scholarmotion.api.learning import (
+    MEDIA_SUFFIXES,
+    OPTIONAL_AUTH_PREFIXES,
+    REQUIRED_AUTH_PREFIXES,
+    create_learning_router,
+)
 from scholarmotion.api.service import (
     activate_video_version,
     openrouter_prices,
@@ -72,6 +89,7 @@ from scholarmotion.persistence.models import (
     UserSession,
     WorkflowExecution,
     WorkspaceProfile,
+    update_quietly,
 )
 from scholarmotion.persistence.qdrant import QdrantConfig, QdrantUnavailable, QdrantVectorStore
 from scholarmotion.persistence.storage import LocalObjectStore
@@ -273,21 +291,33 @@ async def request_observability(request, call_next):
         if supplied != settings.app_api_key:
             return JSONResponse({"detail": "missing or invalid X-API-Key"}, status_code=401)
     auth_context = None
-    if (
-        request.url.path == "/projects"
-        or request.url.path.startswith(("/projects/", "/v1/projects"))
-        or request.url.path.startswith(("/v1/project-folders", "/v1/temporary-chat", "/v1/usage"))
-    ):
+    path = request.url.path
+    required = path == "/projects" or path.startswith(
+        (
+            "/projects/",
+            "/v1/projects",
+            "/v1/project-folders",
+            "/v1/temporary-chat",
+            "/v1/usage",
+            *REQUIRED_AUTH_PREFIXES,
+            KNOWLEDGE_PREFIX,
+        )
+    )
+    # Published videos are open to anyone; a signed-in viewer also sees their own.
+    optional = path.startswith(OPTIONAL_AUTH_PREFIXES)
+    if required or optional:
         raw_token = _bearer_token(request.headers.get("authorization"))
-        if raw_token is None and request.url.path.endswith(
-            ("/video", "/chapters.vtt", "/subtitles.vtt")
-        ):
+        if raw_token is None and path.endswith(MEDIA_SUFFIXES):
+            # Browsers cannot add headers to <video>/<img>/<track> requests.
             raw_token = request.query_params.get("access_token")
-        async with database.sessions() as auth_session:
-            authenticated = await _user_from_token(auth_session, raw_token)
-        if authenticated is None:
+        authenticated = None
+        if raw_token is not None:
+            async with database.sessions() as auth_session:
+                authenticated = await _user_from_token(auth_session, raw_token)
+        if authenticated is None and required:
             return JSONResponse({"detail": "authentication required"}, status_code=401)
-        auth_context = current_user_id.set(authenticated[0].id)
+        if authenticated is not None:
+            auth_context = current_user_id.set(authenticated[0].id)
     try:
         response = await call_next(request)
     except Exception:
@@ -321,6 +351,8 @@ SourceFile = Annotated[UploadFile, File()]
 Authorization = Annotated[str | None, Header()]
 app.include_router(create_capability_router(settings, store, session_dependency))
 app.include_router(create_usage_router(settings, session_dependency, current_user_id))
+app.include_router(create_learning_router(settings, store, session_dependency, current_user_id))
+app.include_router(create_knowledge_router(settings, session_dependency, current_user_id))
 
 
 @app.get("/health")
@@ -508,8 +540,43 @@ async def delete_project_folder(folder_id: UUID, session: SessionDep):
     await session.commit()
 
 
+async def name_chat(project_id: UUID, owner_id: UUID | None, provisional: str) -> None:
+    """Give a new chat a model-written title, unless the learner renamed it meanwhile."""
+    async with database.sessions() as session:
+        project = await session.get(Project, project_id)
+        if project is None:
+            return
+        with track_usage() as ledger:
+            title = await title_for_request(
+                create_llm_provider(settings), project.original_request or project.request
+            )
+        if ledger.entries:
+            try:
+                if any(entry.cost_usd is None for entry in ledger.entries):
+                    ledger.estimate_missing_costs(await openrouter_prices(settings))
+                session.add_all(
+                    usage_rows(
+                        ledger,
+                        user_id=owner_id,
+                        project_id=project_id,
+                        operation="chat_title",
+                        run_id=new_run_id(),
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - accounting must never fail naming
+                logger.warning("Could not record title usage: %s", error)
+        await session.refresh(project)
+        if title and project.title == provisional:
+            await update_quietly(session, project, title=title)
+        await session.commit()
+
+
 @app.post("/projects", status_code=201)
-async def create_project(payload: ProjectCreate, session: SessionDep):
+async def create_project(
+    payload: ProjectCreate,
+    session: SessionDep,
+    background: BackgroundTasks = None,  # type: ignore[assignment]  # injected by FastAPI
+):
     if payload.folder_id is not None:
         await _owned_folder(session, payload.folder_id)
     owner_id = _context_user_id()
@@ -584,6 +651,8 @@ async def create_project(payload: ProjectCreate, session: SessionDep):
     )
     await session.commit()
     await session.refresh(project)
+    if background is not None:
+        background.add_task(name_chat, project.id, owner_id, project.title)
     return _project(project)
 
 
@@ -1843,7 +1912,10 @@ def _project(item: Project) -> dict:
         "pinned": item.pinned,
         "archived": item.archived,
         "video_path": item.active_video_path,
+        "visibility": item.visibility,
+        "subject": item.subject,
         "created_at": item.created_at,
+        "updated_at": item.updated_at,
     }
 
 

@@ -1,0 +1,197 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens: RGB channels, consumed by tailwind.config.js. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --c-bg: 10 11 16; /* Obsidian */
+  --c-surface: 21 23 34; /* Graphite */
+  --c-raised: 31 36 51; /* Slate */
+  --c-sunken: 15 17 25;
+  --c-line: 42 49 66;
+  --c-ink: 248 250 252;
+  --c-ink-2: 161 168 183;
+  --c-muted: 112 120 140;
+  --c-primary: 124 92 255; /* Violet */
+  --c-primary-ink: 255 255 255;
+  --c-teal: 34 211 238; /* Electric teal */
+  --c-amber: 246 178 107;
+  --c-success: 34 197 94;
+  --c-warning: 245 158 11;
+  --c-danger: 239 68 68;
+  --c-plum: 59 47 107; /* Muted purple */
+  --hero-glow: radial-gradient(60% 50% at 70% 10%, rgb(124 92 255 / 0.28), transparent 70%),
+    radial-gradient(40% 40% at 10% 90%, rgb(34 211 238 / 0.12), transparent 70%);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --c-bg: 248 250 252;
+  --c-surface: 255 255 255;
+  --c-raised: 241 243 249;
+  --c-sunken: 236 239 246;
+  --c-line: 226 232 240;
+  --c-ink: 15 23 42;
+  --c-ink-2: 71 85 105;
+  --c-muted: 120 132 152;
+  --c-primary: 99 70 230;
+  --c-primary-ink: 255 255 255;
+  --c-teal: 8 145 178;
+  --c-amber: 217 119 6;
+  --c-success: 22 163 74;
+  --c-warning: 217 119 6;
+  --c-danger: 220 38 38;
+  --c-plum: 237 233 254;
+  --hero-glow: radial-gradient(60% 50% at 70% 10%, rgb(124 92 255 / 0.16), transparent 70%),
+    radial-gradient(40% 40% at 10% 90%, rgb(34 211 238 / 0.10), transparent 70%);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-ink antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+  ::selection {
+    background: rgb(var(--c-primary) / 0.35);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-primary));
+    outline-offset: 2px;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--c-line)) transparent;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-medium transition disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-primary-ink shadow-glow hover:brightness-110 active:brightness-95;
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink hover:bg-raised;
+  }
+  .btn-ghost {
+    @apply btn text-ink-2 hover:bg-raised hover:text-ink;
+  }
+  .btn-accent {
+    @apply btn border border-amber/60 bg-amber/10 text-amber hover:bg-amber/20;
+  }
+  .btn-danger {
+    @apply btn border border-danger/40 bg-danger/10 text-danger hover:bg-danger/20;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .icon-btn {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-xl text-ink-2 transition hover:bg-raised hover:text-ink disabled:pointer-events-none disabled:opacity-40;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-surface;
+  }
+  .input {
+    @apply w-full rounded-xl border border-line bg-sunken px-3.5 py-2.5 text-sm text-ink placeholder:text-muted focus:border-primary/70 focus:outline-none focus:ring-2 focus:ring-primary/25;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-ink-2;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-ink-2 transition hover:border-primary/50 hover:text-ink;
+  }
+  .chip-active {
+    @apply border-primary/60 bg-primary/15 text-ink;
+  }
+  .eyebrow {
+    @apply font-mono text-[11px] uppercase tracking-[0.18em] text-muted;
+  }
+  .skeleton {
+    @apply relative overflow-hidden rounded-xl bg-raised;
+  }
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+  }
+  .gradient-text {
+    background: linear-gradient(100deg, rgb(var(--c-primary)), rgb(var(--c-teal)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+/* Chat markdown */
+.prose-chat {
+  @apply text-[15px] leading-7 text-ink;
+}
+.prose-chat > * + * {
+  @apply mt-3;
+}
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  @apply mt-5 font-display font-semibold;
+}
+.prose-chat h1 {
+  @apply text-xl;
+}
+.prose-chat h2 {
+  @apply text-lg;
+}
+.prose-chat h3 {
+  @apply text-base;
+}
+.prose-chat ul {
+  @apply list-disc pl-6;
+}
+.prose-chat ol {
+  @apply list-decimal pl-6;
+}
+.prose-chat li + li {
+  @apply mt-1;
+}
+.prose-chat a {
+  @apply text-primary underline decoration-primary/40 underline-offset-2;
+}
+.prose-chat code {
+  @apply rounded-md bg-raised px-1.5 py-0.5 font-mono text-[13px];
+}
+.prose-chat pre {
+  @apply overflow-x-auto rounded-xl border border-line bg-sunken p-4;
+}
+.prose-chat pre code {
+  @apply bg-transparent p-0;
+}
+.prose-chat blockquote {
+  @apply border-l-2 border-primary/60 pl-4 text-ink-2;
+}
+.prose-chat table {
+  @apply block w-full overflow-x-auto text-sm;
+}
+.prose-chat th,
+.prose-chat td {
+  @apply border border-line px-3 py-1.5;
+}
+.prose-chat .katex-display {
+  @apply overflow-x-auto overflow-y-hidden py-1;
+}
+
+video::cue {
+  background: rgb(10 11 16 / 0.78);
+  color: #f8fafc;
+  font-family: Inter, "Noto Sans Tamil", system-ui, sans-serif;
+}

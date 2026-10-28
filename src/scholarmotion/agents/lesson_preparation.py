@@ -229,8 +229,11 @@ Return these decisions:
     earlier turn.
 - canonical_message: the latest learner turn translated into concise canonical English.
 - canonical_request: for generate_video, a concise accurate English lesson brief from the latest
-  turn and relevant context. Keep topic and scope; leave out output-language instructions (those
-  belong in text_language/voice_language) and duration instructions; do not invent facts.
+  turn and relevant context. Keep topic and scope, and keep every instruction about how to teach
+  it (voice, person, tone, style, level, analogies, what to emphasise). Say what kind of ask it is
+  when the conversation shows it, for example a doubt or follow-up on an earlier explanation, a
+  walkthrough of a paper, or a new topic. Leave out output-language instructions (those belong in
+  text_language/voice_language) and duration instructions; do not invent facts.
 - input_language: the language the learner wrote in.
 - text_language and voice_language: the language(s) the reply or video should use. For
   edit_video, the language of the video being edited (see VIDEO VERSIONS). Take an

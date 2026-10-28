@@ -17,8 +17,11 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    update,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm.attributes import set_committed_value
 
 from scholarmotion.persistence.database import Base
 
@@ -69,10 +72,36 @@ class Project(Base, IdMixin):
     archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     active_video_path: Mapped[str | None] = mapped_column(Text)
     active_revision: Mapped[int] = mapped_column(Integer, default=1)
+    # Catalog: a finished video its owner chose to publish, with model-written details.
+    visibility: Mapped[str] = mapped_column(String(20), default="private", index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    description: Mapped[str | None] = mapped_column(Text)
+    subject: Mapped[str | None] = mapped_column(String(120), index=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    level: Mapped[str | None] = mapped_column(String(80))
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    catalog_embedding: Mapped[list[float] | None] = mapped_column(JSON)
+    # When this chat was last read into its owner's knowledge graph.
+    graph_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     scenes: Mapped[list[Scene]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
+
+
+async def update_quietly(session: AsyncSession, project: Project, **values: Any) -> None:
+    """Change bookkeeping fields without touching updated_at.
+
+    The chat list is ordered by updated_at, so work the learner did not do (model titles,
+    knowledge-map reads, view counts, search vectors) must not move a chat to the top.
+    """
+    await session.execute(
+        update(Project)
+        .where(Project.id == project.id)
+        .values(**values, updated_at=Project.updated_at)
+    )
+    for key, value in values.items():
+        set_committed_value(project, key, value)
 
 
 class WorkspaceProfile(Base, IdMixin):
@@ -585,3 +614,183 @@ class ProgressEvent(Base, IdMixin):
     scene_id: Mapped[UUID | None] = mapped_column(ForeignKey("scenes.id", ondelete="CASCADE"))
     event: Mapped[str] = mapped_column(String(100), index=True)
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class SavedVideo(Base, IdMixin):
+    """A video, usually someone else's public one, kept in a learner's library."""
+
+    __tablename__ = "saved_videos"
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    __table_args__ = (UniqueConstraint("user_id", "project_id"),)
+
+
+class WatchProgress(Base, IdMixin):
+    """Where a learner stopped in a video, for "continue learning"."""
+
+    __tablename__ = "watch_progress"
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    position_seconds: Mapped[float] = mapped_column(Float, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0)
+    completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (UniqueConstraint("user_id", "project_id"),)
+
+
+class VideoNote(Base, IdMixin):
+    """A learner's private note pinned to a moment of a video."""
+
+    __tablename__ = "video_notes"
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    at_seconds: Mapped[float] = mapped_column(Float, default=0)
+    text: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class Playlist(Base, IdMixin):
+    __tablename__ = "playlists"
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class PlaylistItem(Base, IdMixin):
+    __tablename__ = "playlist_items"
+    playlist_id: Mapped[UUID] = mapped_column(
+        ForeignKey("playlists.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    __table_args__ = (UniqueConstraint("playlist_id", "project_id"),)
+
+
+class StudyPlan(Base, IdMixin):
+    """A learner's goal and the schedule the study planner agent made for it."""
+
+    __tablename__ = "study_plans"
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    goal: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(String(300))
+    summary: Mapped[str | None] = mapped_column(Text)
+    start_date: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    minutes_per_day: Mapped[int] = mapped_column(Integer, default=30)
+    language: Mapped[str] = mapped_column(String(80), default="English")
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
+
+class StudyTask(Base, IdMixin):
+    __tablename__ = "study_tasks"
+    plan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("study_plans.id", ondelete="CASCADE"), index=True
+    )
+    due_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(300))
+    detail: Mapped[str | None] = mapped_column(Text)
+    minutes: Mapped[int] = mapped_column(Integer, default=15)
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), index=True
+    )
+    topic: Mapped[str | None] = mapped_column(Text)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Quiz(Base, IdMixin):
+    """Practice questions the quiz agent wrote from a video or a topic."""
+
+    __tablename__ = "quizzes"
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), index=True
+    )
+    topic: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(String(300))
+    language: Mapped[str] = mapped_column(String(80), default="English")
+    questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+
+class QuizAttempt(Base, IdMixin):
+    __tablename__ = "quiz_attempts"
+    quiz_id: Mapped[UUID] = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    answers: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    score: Mapped[float] = mapped_column(Float, default=0)
+
+
+class KnowledgeNode(Base, IdMixin):
+    """A concept in a learner's knowledge graph; its vector lives here and in Qdrant."""
+
+    __tablename__ = "knowledge_nodes"
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    key: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(200))
+    description: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str | None] = mapped_column(String(60))
+    embedding: Mapped[list[float] | None] = mapped_column(JSON)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+    __table_args__ = (UniqueConstraint("owner_id", "key"),)
+
+
+class KnowledgeEdge(Base, IdMixin):
+    """A relation between two concepts, as stated in one chat."""
+
+    __tablename__ = "knowledge_edges"
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    source_id: Mapped[UUID] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True
+    )
+    target_id: Mapped[UUID] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True
+    )
+    relation: Mapped[str] = mapped_column(String(80))
+    detail: Mapped[str | None] = mapped_column(Text)
+
+
+class KnowledgeMention(Base, IdMixin):
+    """A chat in which a concept came up."""
+
+    __tablename__ = "knowledge_mentions"
+    node_id: Mapped[UUID] = mapped_column(
+        ForeignKey("knowledge_nodes.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    __table_args__ = (UniqueConstraint("node_id", "project_id"),)

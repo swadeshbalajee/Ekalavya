@@ -48,15 +48,19 @@ SOURCE_POLICIES = {
     "only_given": (
         "SOURCE POLICY: the learner asked for this lesson to be made ONLY from the source they "
         "provided. Teach what that source says: its ideas, arguments, examples and conclusions, "
-        "following its line of reasoning, and attribute its views to the author ('the author "
-        "argues...'). Use nothing beyond the Grounding evidence except plain explanations of "
-        "everyday words needed to follow it. Do not judge, verify or correct the source."
+        "following its line of reasoning. Make clear once, early on, which source this lesson "
+        "explains; after that, teach its ideas in your own voice as the teacher, the way a "
+        "teacher walks a class through a text, instead of prefacing sentences with 'the author "
+        "says'. Mention the author again only where it helps, such as a claim that is "
+        "specifically the author's interpretation. Use nothing beyond the Grounding evidence "
+        "except plain explanations of everyday words needed to follow it. Do not judge, verify "
+        "or correct the source."
     ),
     "given_plus_web": (
         "SOURCE POLICY: centre the lesson on the learner's own source (evidence whose source id "
-        "does not start with 'web-'): explain its ideas first and attribute them to the author. "
-        "Web evidence may only add background or context, and must be presented as separate "
-        "from what the source says."
+        "does not start with 'web-'): explain its ideas first, in your own voice as the teacher, "
+        "making clear once which source they come from. Web evidence may only add background "
+        "or context, and must be presented as separate from what the source says."
     ),
 }
 
@@ -70,7 +74,22 @@ on the segment that discusses those results and say the actual numbers from the 
 chapter lists figures, set `figure_labels` on the segment that walks through that figure (the
 student sees the original image) and refer to its parts in the order of its notes. Never
 invent results or numbers that are not in the plan. Say clearly when an example is illustrative.
-End with the paper's contribution, its limitations and what the student should remember."""
+Near the end, cover the paper's contribution, its limitations and what the student should
+remember."""
+
+TEACHER_VOICE = """VOICE: You are the learner's teacher, speaking to them directly in this video.
+Speak in the first person ("I", "let me show you", "we can see") and address the learner as
+"you". Never talk about yourself, a narrator, a presenter or the video in the third person, and
+never describe the learner as "the student" or "the viewer". If the learner asked for a
+particular voice, person, tone or style, follow it exactly."""
+
+NATURAL_ENDING = """ENDING: Finish the way a good teacher would end this particular conversation,
+judging from what the learner asked. First complete the explanation; then close naturally. For
+example, after walking through a paper you might sum up its main points and thank them or invite
+questions; after answering a doubt or a follow-up you might check whether that answers their
+question; after a new topic you might recap the key idea and invite them to ask if anything is
+unclear. These are examples, not a template: choose and word the ending yourself so it fits the
+ask. Do not tease new content or promise another video."""
 
 
 def _constrain_spoken_word_budget(text: str, target_seconds: float) -> str:
@@ -102,8 +121,8 @@ The learner may have asked only for a topic. Make the teaching choices they shou
 specify: default to an interested high-school beginner unless the request names another level.
 Explain the formal idea and work through a concrete example. Do not introduce or prescribe an
 analogy unless the learner explicitly requests one. Connect every symbol to its meaning and units
-when relevant. Preserve any audience, language, analogy, depth, or format the learner explicitly
-requested. Do not pad the lesson by repeating generic definitions; each segment must teach a new
+when relevant. Preserve any audience, language, analogy, depth, voice, tone, or format the learner
+explicitly requested. Do not pad the lesson by repeating generic definitions; each segment must teach a new
 step. Prefer a progressively revealed mechanism, a toy worked example, and a misconception check
 over a string of definitions. If the learner explicitly asks for an analogy, keep it accurate and
 state where it stops matching the real system.
@@ -111,9 +130,9 @@ Write the canonical narration in English only, regardless of the requested outpu
 headers, no bullet points, no stage directions. Any language preference in the learner request is
 presentation metadata and must not change this English source script.
 State the actual physics — the definition, the equation, the reasoning, a concrete worked example —
-using the supplied textbook facts as grounding. Do not describe the teaching process itself
-(never write meta-commentary like "we will explore this" or "notice what changes on screen");
-just teach the concept directly, as a person would explain it out loud.
+using the supplied textbook facts as grounding. Teach the concept directly, as a teacher
+explaining it out loud: do not spend sentences announcing what the lesson will cover ("in this
+video we will explore...") or describing the screen layout; every sentence should teach.
 This narration is read aloud by a speech engine and shown as subtitles, so write it as plain
 spoken words only. Never use LaTeX or any math markup: no $...$, no backslash commands, no
 ^ or _ for powers and subscripts. Say "p equals q times two a", "one over r cubed",
@@ -199,7 +218,7 @@ def _build_prompt(
         if is_opening
         else "This continues directly from the previous segment; do not re-introduce the topic."
     )
-    closing = " End with a one-sentence takeaway the learner should remember." if is_closing else ""
+    closing = f"\n{NATURAL_ENDING}" if is_closing else ""
     teaching_moves = [
         "Start with the learner's concrete question and an observable physical setup. State the intuition this segment establishes without prescribing an analogy.",
         "Build the mechanism from that intuition. Define the important quantities and show how they interact; connect the mechanism to the exact formal relationship when one is supplied.",
@@ -219,7 +238,7 @@ def _build_prompt(
     )
     fallback = _fallback_narration(item, target_words=target_words, is_closing=is_closing)
     return (
-        f"{RULES}\n\n{skill_context}\n\n"
+        f"{RULES}\n{TEACHER_VOICE}\n\n{skill_context}\n\n"
         f"Learner level: {audience}.\n"
         f"Learner's original request: {learner_request or '(a short request for this topic)'}\n"
         "STEM EQUATIONS: use exact notation from the retrieved evidence when available.\n"
@@ -319,7 +338,8 @@ async def write_script(
                 _chapter_plan(chapter, item) for chapter, item in enumerate(curriculum.items, 1)
             )
         prompt = (
-            f"{RULES}\n{PAPER_LECTURE_RULES if paper_lecture else ''}\n"
+            f"{RULES}\n{TEACHER_VOICE}\n{NATURAL_ENDING}\n"
+            f"{PAPER_LECTURE_RULES if paper_lecture else ''}\n"
             f"{SOURCE_POLICIES.get(source_scope, '')}\n{skill_context}\n"
             f"Learner: {learner_request}\nLevel: {learner_level}\n"
             f"Grounding: {evidence}\n{outline}\n"
@@ -329,8 +349,9 @@ async def write_script(
             "introduce the problem, develop its mechanism, then resolve it with a meaningful "
             "takeaway. Each scene continues the previous one, with consistent symbols, numbers "
             "and example. Never announce a next scene unless that scene actually follows. "
-            "The final segment must finish the explanation with a complete concluding sentence, "
-            "not a teaser, a new topic, or an unfinished calculation. Respect every word budget."
+            "The final segment must finish the explanation and then close naturally as ENDING "
+            "describes, not with a teaser, a new topic, or an unfinished calculation. Respect "
+            "every word budget."
         )
 
         def accept(
@@ -390,7 +411,13 @@ async def write_script(
                     "wrong mathematics or facts, inconsistent worked values, a missing core idea "
                     "the learner asked about, symbols used but never explained, broken scene "
                     "transitions, or an ending that stops mid-thought, teases more content, or "
-                    "lacks a takeaway. Also set blocking=true for narration that talks about the "
+                    "never resolves the explanation. A closing that speaks to the learner (a "
+                    "recap, thanks, inviting questions, asking whether it answered their "
+                    "question) is good teaching, not a note about the video. Set blocking=true "
+                    "when the narration talks about the teacher, a narrator or the video in the "
+                    "third person instead of speaking as the teacher in the first person, or "
+                    "ignores a voice or style the learner asked for. Also set blocking=true for "
+                    "narration that talks about the "
                     "sources or how the lesson was made instead of teaching: whether a source "
                     "could be verified, found or accessed, what was searched, remarks such as "
                     "'as an AI', or notes to the viewer about the video itself. When a SOURCE "
@@ -504,6 +531,8 @@ Rewrite the narration so it addresses their request. Keep the same physics and t
 objective, but change how it is explained. Stay roughly the same length unless the request implies
 otherwise, for example asking for a slower or more detailed explanation.
 
+You are the learner's teacher: speak in the first person to "you", never about a narrator, a
+presenter or the video in the third person.
 Write natural spoken English only. Never acknowledge the request, never say "as you asked" or
 "let me explain again", and never mention that this is a revision. The student should simply hear a
 better explanation. Never use LaTeX or math markup: no $...$, no backslash commands, no ^ or _.

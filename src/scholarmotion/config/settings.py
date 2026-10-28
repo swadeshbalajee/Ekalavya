@@ -135,6 +135,7 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = None
     qdrant_source_collection: str = "scholarmotion_source_chunks"
     qdrant_skill_collection: str = "scholarmotion_skills"
+    qdrant_knowledge_collection: str = "scholarmotion_knowledge"
 
     embedding_provider: str = "local"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

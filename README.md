@@ -69,7 +69,19 @@ Named after Ekalavya, the self-taught archer of the Mahabharata who learned by w
 - **Durable jobs.** Builds run as Temporal workflows. A failed rebuild restores the previous working video.
 - **Model fallbacks.** Every model capability has a fallback model.
 
-**Usage & activity dashboard** (Settings → Account → *Usage & activity*)
+**Learning beyond the chat**
+- **Landing page** for visitors, with public explainer videos and sign-up.
+- **Home:** greeting, quick actions (explain, make a video, summarize a paper, quiz me), *Continue learning* from where you stopped, today's study tasks, and recommendations.
+- **Discover:** a public catalog. Any learner can publish a finished video; the catalog agent writes its title, summary, subject and keywords. Search needs every keyword; when nothing matches, the closest videos by meaning are offered. Subjects are the model's own words, so the filters grow with the catalog.
+- **Video page:** chapters, Notes pinned to moments, a searchable Transcript, Resources (the sources used), Practice, Save, Playlist, Share, Download and related videos.
+- **Library:** your videos and saved ones, documents you attached, all your notes, and playlists.
+- **Study plan:** state a goal, a date and minutes per day. The study planner agent schedules watching, practice, reading, review, and new videos for gaps. A weekly progress ring, today's tasks, a calendar, and *Replan* from today when life happens.
+- **Quiz me:** the quiz agent writes questions from a video's narration, or on a topic. Written answers are graded by the model, and each wrong answer links to the scene that explains it.
+- **Recommendations and related videos** rank by embedding similarity to what you study, not by rules.
+- **Knowledge map** (sidebar → *Knowledge map*): a graph of every concept from your chats and lessons and how they relate. An agent reads each chat, names the concepts and relations in its own words, and reuses existing concept names so one idea stays one node across chats. The graph lives in PostgreSQL; each concept's vector is also indexed in Qdrant. Explore it as an interactive force graph, find concepts by meaning, or *Ask your map*: the question finds the closest concepts, widens to their neighbours, and the answer uses only those facts, citing the concepts and chats.
+- **Chat titles** are written by the model from your first message, in the language you wrote in. Renaming a chat keeps your title.
+
+**Usage & activity dashboard** (sidebar → *Usage*)
 - **Totals:** spend, tokens, videos built, average build time, success rate and retries, for 7, 30 or 90 days, or all time.
 - **Live runs:** an Airflow-style graph of the lesson stages, with a lane per scene showing what is done, running and next.
 - **Breakdowns:** spend per day and per module (script, Manim code, code repair, video review, translation, narration and more).
@@ -134,7 +146,7 @@ docker compose up --build
 The first build takes about 10–15 minutes. It installs Manim, LaTeX, FFmpeg, CPU PyTorch and Noto fonts for Indic scripts. Later starts take seconds. Compose runs:
 - PostgreSQL, Qdrant and Temporal;
 - a one-shot database migration;
-- the API, the worker and the UI.
+- the API, the worker and the web app.
 
 **Stopping and data:**
 - `Ctrl+C` or `docker compose down` stops the stack.
@@ -158,13 +170,15 @@ The project was developed natively on Windows. `scripts/setup-local.ps1` does th
 powershell -ExecutionPolicy Bypass -File scripts\setup-local.ps1
 powershell -ExecutionPolicy Bypass -File scripts\start-local.ps1
 ```
+
+For the React app with hot reload, run `npm install` then `npm run dev` in `web/` and open http://127.0.0.1:5173. The dev server forwards `/api` to the API at `EKALAVYA_API_URL` (default `http://127.0.0.1:8000`) and adds `APP_API_KEY` from `.env`.
 </details>
 
 ### Open the app
 
 | | URL |
 |---|---|
-| **App** | http://127.0.0.1:8501 |
+| **App** | http://127.0.0.1:8080 |
 | API docs (OpenAPI) | http://127.0.0.1:8000/docs |
 | Temporal UI | http://127.0.0.1:8233 |
 
@@ -235,7 +249,11 @@ EMBEDDING_PROVIDER=local                          # sentence-transformers, runs 
 
 ```
 Ekalavya/
-├── frontend/                 Streamlit UI
+├── web/                      React app (Vite, TypeScript, Tailwind), served by nginx
+│   ├── src/pages/              Landing, Home, Chat, Discover, Watch, Library, Study, Quiz, Usage
+│   ├── src/components/         app shell, video player, cards, chat composer and progress
+│   └── nginx.conf.template     serves the app; proxies /api to FastAPI and adds the API key
+├── frontend/                 previous Streamlit UI
 │   ├── app.py                  chat, sidebar/folders, player, edit & branch UI, settings
 │   ├── dashboard.py            usage & activity dashboard page
 │   ├── assets/                 logo (ழ)
@@ -245,10 +263,13 @@ Ekalavya/
 │   │   ├── main.py               routes: auth, chats, messages, sources, builds, edits, media
 │   │   ├── tutor.py              chat turn routing (answer / start video / edit / ask about sources)
 │   │   ├── service.py            build, edit and localization services; video versions
+│   │   ├── learning.py           catalog, library, notes, playlists, home, study plans, quizzes
+│   │   ├── knowledge.py          knowledge map: concept graph, semantic search, graph questions
 │   │   ├── capabilities.py       per-capability endpoints (/v1/capabilities/*)
 │   │   └── usage.py              usage dashboard API (/v1/usage/*)
 │   ├── agents/                 LLM agents: lesson preparation, curriculum, script writer,
-│   │                           storyboard, Manim code generator, repair manager
+│   │                           storyboard, Manim code generator, repair manager,
+│   │                           video catalog, study planner, quiz writer, concept graph, chat titles
 │   ├── services/orchestration.py  the lesson pipeline (scenes in parallel, review, repair, assembly)
 │   ├── manim_runtime/          sandbox renderer, AST validator, layout components, templates
 │   ├── verification/           render, layout, math, pedagogy, grounding and chat-reply checks
@@ -281,8 +302,9 @@ Ekalavya/
 
 ```powershell
 conda activate scholarmotion
-pytest -q        # ~380 tests, all offline: providers, DB and media are mocked or in-memory
+pytest -q        # ~400 tests, all offline: providers, DB and media are mocked or in-memory
 ruff check src tests frontend
+cd web && npm ci && npm run build    # type-checks and builds the React app
 ```
 
 The suite covers:
@@ -310,6 +332,9 @@ The full API is documented at `/docs`. Every route except `/health`, `/docs` and
 - `/v1/capabilities/*`: each model capability on its own (code, vision, TTS, STT, translation).
 - `/v1/skills/*`: versioned agent skills with progressive disclosure.
 - `/v1/usage/summary`, `/v1/usage/chats/{id}`, `/v1/usage/live`: the usage dashboard's data.
+- `/v1/videos/*`: the public catalog and search, a video's media, transcript, notes, progress, saves, sources, and publishing (open to visitors for public videos).
+- `/v1/library/*`, `/v1/home`, `/v1/study-plans/*`, `/v1/quizzes/*`: library, playlists, home feed, study plans and quizzes.
+- `/v1/knowledge/*`: the knowledge map (`sync`, `graph`, `nodes/{id}`, `search`, `query`).
 - `/metrics`: Prometheus counters for latency, provider fallbacks and workflow outcomes.
 
 ---

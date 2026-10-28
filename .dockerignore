@@ -10,6 +10,8 @@ snapshots
 docs
 tests
 scripts
+!scripts/retitle_chats.py
+web
 **/__pycache__
 **/*.py[cod]
 .pytest_cache

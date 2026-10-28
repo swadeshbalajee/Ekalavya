@@ -400,3 +400,41 @@ def test_large_audio_tempo_change_is_not_used_to_force_duration(tmp_path):
         pipeline._fit_narration_to_scene_budget(audio, target_seconds=40, artifact_version=1)
         is audio
     )
+
+
+@pytest.mark.asyncio
+async def test_the_script_is_written_and_reviewed_as_a_first_person_teacher():
+    """The writer speaks as the learner's teacher and chooses its own natural ending;
+    the reviewer treats third-person narration as a problem and a sign-off as teaching."""
+
+    class Planner:
+        prompts: dict = {}
+
+        async def generate_structured(self, prompt, schema, **kwargs):
+            self.prompts[schema] = prompt
+            if schema is LessonScript:
+                return schema(
+                    segments=[
+                        {
+                            "narration": "I will show you why the mask hides future tokens. "
+                            "Does that answer your question?",
+                            "equations": [],
+                        }
+                    ]
+                )
+            return schema(approved=True, problems=[])
+
+    provider = Planner()
+    await write_script(
+        provider,
+        CurriculumPlan(
+            topic="Causal attention",
+            items=[CurriculumItem(title="Mask", objective="Explain the mask", duration_seconds=30)],
+        ),
+        {},
+        learner_request="Why does the decoder need a mask? Do not explain it in third person.",
+    )
+    writer, reviewer = provider.prompts[LessonScript], provider.prompts[ScriptReview]
+    assert "first person" in writer and "ENDING" in writer
+    assert "Do not explain it in third person" in writer
+    assert "third person" in reviewer and "inviting questions" in reviewer

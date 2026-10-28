@@ -19,6 +19,7 @@ class QdrantConfig:
     source_collection: str
     skill_collection: str
     dimensions: int
+    knowledge_collection: str = "scholarmotion_knowledge"
 
     @classmethod
     def from_settings(cls, settings: Settings) -> QdrantConfig:
@@ -28,6 +29,7 @@ class QdrantConfig:
             source_collection=settings.qdrant_source_collection,
             skill_collection=settings.qdrant_skill_collection,
             dimensions=settings.embedding_dimensions,
+            knowledge_collection=settings.qdrant_knowledge_collection,
         )
 
 
@@ -51,7 +53,11 @@ class QdrantVectorStore:
             from qdrant_client import models
 
             client = await self._get_client()
-            for name in (self.config.source_collection, self.config.skill_collection):
+            for name in (
+                self.config.source_collection,
+                self.config.skill_collection,
+                self.config.knowledge_collection,
+            ):
                 if not await client.collection_exists(name):
                     await client.create_collection(
                         collection_name=name,
@@ -69,6 +75,31 @@ class QdrantVectorStore:
 
     async def upsert_skill_versions(self, points: list[dict[str, Any]]) -> None:
         await self._upsert(self.config.skill_collection, points)
+
+    async def upsert_knowledge_nodes(self, points: list[dict[str, Any]]) -> None:
+        await self._upsert(self.config.knowledge_collection, points)
+
+    async def delete_knowledge_nodes(self, ids: list[str]) -> None:
+        if not ids:
+            return
+        try:
+            from qdrant_client import models
+
+            client = await self._get_client()
+            await client.delete(
+                collection_name=self.config.knowledge_collection,
+                points_selector=models.PointIdsList(points=ids),
+                wait=True,
+            )
+        except Exception as error:
+            raise QdrantUnavailable(f"Qdrant delete failed: {error}") from error
+
+    async def query_knowledge(
+        self, vector: list[float], *, owner_id: str, limit: int = 8
+    ) -> list[tuple[str, float, dict[str, Any]]]:
+        return await self._query(
+            self.config.knowledge_collection, vector, filters={"owner_id": owner_id}, limit=limit
+        )
 
     async def reconcile_collection(self, collection: str, points: list[dict[str, Any]]) -> None:
         """Upsert authoritative PostgreSQL points and remove stale index rows."""

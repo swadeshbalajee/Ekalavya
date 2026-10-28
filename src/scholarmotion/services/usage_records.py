@@ -20,7 +20,12 @@ _MODULES = (
     ("paper_outline", "Paper outline"),
     ("storyboard", "Storyboard"),
     ("script", "Script"),
+    ("chat_title", "Chat titles"),
     ("chat", "Chat & planning"),
+    ("catalog", "Video catalog"),
+    ("study_plan", "Study plans"),
+    ("quiz", "Quizzes"),
+    ("knowledge_graph", "Knowledge map"),
     ("web_answer", "Chat & planning"),
     ("code", "Manim code"),
 )

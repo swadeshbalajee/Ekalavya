@@ -80,24 +80,18 @@ services:
       temporal:
         condition: service_started
 
-  frontend:
-    <<: *app
-    command:
-      - streamlit
-      - run
-      - frontend/app.py
-      - --server.address=0.0.0.0
-      - --server.port=8501
-      - --server.headless=true
-      - --browser.gatherUsageStats=false
+  # The React app (landing page, chat, library, study plan…) at http://localhost:8080.
+  web:
+    build: ./web
+    image: ekalavya-web:latest
     environment:
-      SCHOLARMOTION_API_URL: http://api:8000             # server-side calls
-      SCHOLARMOTION_PUBLIC_API_URL: http://127.0.0.1:8000  # video links opened by the browser
-      SCHOLARMOTION_API_KEY: ${APP_API_KEY:-}
+      API_UPSTREAM: http://api:8000
+      APP_API_KEY: ${APP_API_KEY:-}
     ports:
-      - "127.0.0.1:8501:8501"
+      - "127.0.0.1:8080:80"
     depends_on:
       - api
+    restart: unless-stopped
 
 volumes:
   postgres-data:
