@@ -33,3 +33,4 @@ snapshots/
 .idea/
 .DS_Store
 Thumbs.db
+.qdrant-initialized
