@@ -57,21 +57,7 @@ Named after Ekalavya, the self-taught archer of the Mahabharata who learned by w
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    UI["Streamlit UI<br/>chat · player · scene edits"] --> API["FastAPI<br/>auth · chats · sources · progress"]
-    API --> PG[("PostgreSQL<br/>source of truth")]
-    API --> QD[("Qdrant<br/>retrieval index")]
-    API --> TW["Temporal workflow"]
-    TW --> W["Worker: lesson pipeline"]
-    W --> P1["1 · Prepare<br/>intent, language, sources"]
-    P1 --> P2["2 · Script + review"]
-    P2 --> P3["3 · Per scene, in parallel:<br/>storyboard → TTS → Manim code → render → verify → repair"]
-    P3 --> P4["4 · Whole-lesson review<br/>+ targeted scene repair"]
-    P4 --> P5["5 · FFmpeg assembly<br/>MP4 + captions + chapters"]
-    P5 --> ST[("Artifact store<br/>projects/")]
-    ST --> UI
-```
+![Ekalavya architecture](docs/diagrams/architecture.svg)
 
 **Main components:**
 - **PostgreSQL** holds the authoritative records: accounts, chats, projects, and every versioned artifact (script, spec, code, audio, render, video).

@@ -1,6 +1,6 @@
 # Ekalavya system design
 
-![Ekalavya system design](system-design.png)
+![Ekalavya system design](diagrams/architecture.svg)
 
 ## Runtime boundaries
 
@@ -19,4 +19,4 @@
 
 The lesson pipeline is a set of worker-invoked application modules, not separately deployed API services. This is why curriculum, script, translation, and scene-code generation appear once—inside the worker pipeline.
 
-**Data and providers** are dependencies rather than pipeline stages. PostgreSQL is authoritative for projects, chat, and metadata. Qdrant is a rebuildable retrieval index. The artifact store retains MP4, audio, and SRT/VTT files. Model providers are configured per capability in `.env`; the reference setup uses OpenRouter (Claude Sonnet for scripts and Manim code, Claude Haiku for planning, Gemini Flash for translation, vision and TTS, Whisper for voice input), with a fallback model for each. (The diagram's "Gemini Pro → Gemini Flash" label predates this setup.)
+**Data and providers** are dependencies rather than pipeline stages. PostgreSQL is authoritative for projects, chat, and metadata. Qdrant is a rebuildable retrieval index. The artifact store retains MP4, audio, and SRT/VTT files. Model providers are configured per capability in `.env`; the reference setup uses OpenRouter (Claude Sonnet for scripts and Manim code, Claude Haiku for planning, Gemini Flash for translation, vision and TTS, Whisper for voice input), with a fallback model for each.

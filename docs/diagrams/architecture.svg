@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 650" width="900" height="650" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <title>Ekalavya architecture</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .t { font-size: 15px; font-weight: 600; fill: #0f172a; }
+      .s { font-size: 12px; fill: #475569; }
+      .g { font-size: 13px; font-weight: 600; fill: #9a5b13; }
+      .d { font-size: 13px; font-weight: 600; fill: #1d4ed8; }
+      .e { font-size: 11.5px; fill: #334155; font-style: italic; }
+      .line { stroke: #334155; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="900" height="650" fill="#ffffff"/>
+
+  <!-- Learner-facing column -->
+  <rect x="60" y="40" width="190" height="70" rx="10" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="155" y="70" class="t" text-anchor="middle">Streamlit UI</text>
+  <text x="155" y="90" class="s" text-anchor="middle">chat · player · scene edits</text>
+
+  <rect x="60" y="170" width="190" height="70" rx="10" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+  <text x="155" y="200" class="t" text-anchor="middle">FastAPI</text>
+  <text x="155" y="220" class="s" text-anchor="middle">auth · chats · sources · progress</text>
+
+  <rect x="50" y="290" width="210" height="190" rx="12" fill="#f5f9ff" stroke="#4a86e8" stroke-dasharray="5 4"/>
+  <text x="66" y="312" class="d">Data</text>
+  <rect x="70" y="325" width="170" height="60" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+  <text x="155" y="350" class="t" text-anchor="middle">PostgreSQL</text>
+  <text x="155" y="369" class="s" text-anchor="middle">source of truth</text>
+  <rect x="70" y="400" width="170" height="60" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+  <text x="155" y="425" class="t" text-anchor="middle">Qdrant</text>
+  <text x="155" y="444" class="s" text-anchor="middle">retrieval index</text>
+
+  <!-- Durable pipeline column -->
+  <rect x="315" y="40" width="250" height="50" rx="10" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+  <text x="440" y="70" class="t" text-anchor="middle">Temporal workflow</text>
+
+  <rect x="300" y="120" width="280" height="470" rx="12" fill="#fffaf2" stroke="#f0a04b" stroke-dasharray="5 4"/>
+  <text x="316" y="142" class="g">Worker: lesson pipeline</text>
+
+  <rect x="315" y="155" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+  <text x="440" y="180" class="t" text-anchor="middle">1 · Prepare</text>
+  <text x="440" y="199" class="s" text-anchor="middle">intent · language · sources</text>
+
+  <rect x="315" y="240" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+  <text x="440" y="265" class="t" text-anchor="middle">2 · Script + review</text>
+  <text x="440" y="284" class="s" text-anchor="middle">whole lesson, self-reviewed</text>
+
+  <rect x="315" y="325" width="250" height="80" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+  <text x="440" y="350" class="t" text-anchor="middle">3 · Per scene, in parallel</text>
+  <text x="440" y="369" class="s" text-anchor="middle">storyboard → TTS → Manim code</text>
+  <text x="440" y="386" class="s" text-anchor="middle">→ render → verify → repair</text>
+
+  <rect x="315" y="430" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+  <text x="440" y="455" class="t" text-anchor="middle">4 · Whole-lesson review</text>
+  <text x="440" y="474" class="s" text-anchor="middle">rebuilds up to 3 weak scenes</text>
+
+  <rect x="315" y="515" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+  <text x="440" y="540" class="t" text-anchor="middle">5 · FFmpeg assembly</text>
+  <text x="440" y="559" class="s" text-anchor="middle">MP4 · captions · chapters</text>
+
+  <!-- Providers and artifacts column -->
+  <rect x="640" y="290" width="230" height="90" rx="10" fill="#f3ebfd" stroke="#8e6bd8" stroke-width="1.5"/>
+  <text x="755" y="318" class="t" text-anchor="middle">Model providers</text>
+  <text x="755" y="338" class="s" text-anchor="middle">OpenRouter · Bodhan</text>
+  <text x="755" y="356" class="s" text-anchor="middle">LLM · translation · TTS · STT</text>
+
+  <rect x="640" y="510" width="230" height="70" rx="10" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+  <text x="755" y="540" class="t" text-anchor="middle">Artifact store</text>
+  <text x="755" y="560" class="s" text-anchor="middle">projects/ · MP4 · audio · VTT</text>
+
+  <!-- Arrows -->
+  <path class="line" d="M155,110 V168"/>
+  <path class="line" d="M250,190 H285 V65 H313"/>
+  <path class="line" d="M155,240 V288"/>
+  <path class="line" d="M440,90 V153"/>
+  <path class="line" d="M440,215 V238"/>
+  <path class="line" d="M440,300 V323"/>
+  <path class="line" d="M440,405 V428"/>
+  <path class="line" d="M440,490 V513"/>
+  <path class="line" d="M300,385 H262"/>
+  <text x="281" y="377" class="e" text-anchor="middle">writes</text>
+  <path class="line" d="M580,335 H638"/>
+  <path class="line" d="M565,545 H638"/>
+  <path class="line" d="M755,580 V620 H30 V75 H58"/>
+  <text x="440" y="612" class="e" text-anchor="middle">video + captions stream back to the player</text>
+</svg>
