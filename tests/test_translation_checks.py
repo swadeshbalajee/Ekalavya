@@ -17,7 +17,12 @@ from scholarmotion.providers.bodhan import (
     parse_voice_map,
 )
 from scholarmotion.schemas import SceneSpec, VisualBeat
-from scholarmotion.translation.checks import name_present, translation_problems, unspeakable
+from scholarmotion.translation.checks import (
+    missing_names,
+    name_present,
+    translation_problems,
+    unspeakable,
+)
 from scholarmotion.translation.entities import mask, restore_screen, restore_voice
 from scholarmotion.translation.service import TranslationService
 from scholarmotion.translation.spoken import number_words, spoken_quantity
@@ -82,12 +87,20 @@ def test_lost_placeholder_and_invented_number_are_caught():
     problems = translation_problems(
         masked, f"அலை காற்றில் {masked.items[0].token} 12 பயணிக்கிறது.", target_language="Tamil"
     )
-    assert any("number was added" in problem for problem in problems)
+    assert any("digits 1 2 were added" in problem for problem in problems)
 
 
-def test_transliterated_name_is_recognised():
+def test_transliterated_name_is_recognised_even_with_a_case_ending():
     assert name_present("Einstein", "ஐன்ஸ்டீன் ஒளியைப் பற்றி கூறினார்")
+    assert name_present("Germany", "ஜெர்மனியில் காட்டினார்")
     assert not name_present("Einstein", "நியூட்டன் ஒளியைப் பற்றி கூறினார்")
+
+
+def test_a_missing_name_is_a_note_not_a_failure():
+    masked = mask("Einstein explained the effect clearly to every student.")
+    translated = "அவர் விளைவை ஒவ்வொரு மாணவருக்கும் தெளிவாக விளக்கினார்."
+    assert translation_problems(masked, translated, target_language="Tamil") == []
+    assert missing_names(masked, translated) == ["Einstein"]
 
 
 def test_untranslated_and_truncated_output_is_rejected():
@@ -196,6 +209,20 @@ async def test_screen_text_stays_english_when_every_attempt_fails():
     )
     assert display.title == "The photoelectric effect"
     assert any(event["status"] == "fallback" for event in service.events)
+
+
+@pytest.mark.asyncio
+async def test_narration_keeps_its_best_attempt_and_is_never_english():
+    class Broken(_LLM):
+        async def generate_text(self, prompt, *, temperature=None):
+            return "தவறு"
+
+    service = TranslationService(Broken(), _Machine(drop_tokens=True))
+    _, narration = await service.localize_scene(
+        _scene(), text_language="Tamil", voice_language="Tamil"
+    )
+    assert narration.startswith("தமிழ்: ")
+    assert any(event["status"] == "kept_with_problems" for event in service.events)
 
 
 @pytest.mark.asyncio

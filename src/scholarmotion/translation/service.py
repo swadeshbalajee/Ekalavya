@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from scholarmotion.observability.usage import usage_stage
 from scholarmotion.schemas import SceneSpec
-from scholarmotion.translation.checks import translation_problems, unspeakable
+from scholarmotion.translation.checks import missing_names, translation_problems, unspeakable
 from scholarmotion.translation.entities import (
     TOKEN,
     MaskedText,
@@ -166,7 +166,11 @@ class TranslationService:
         if not _is_english(voice_language):
             voice_glossary = await self.glossary(terms, voice_language)
             masked_narration = protect(spec.narration)
-            [result] = await self._translate_all([masked_narration], voice_language)
+            # Speech must be in the narration language: keep the best attempt
+            # rather than falling back to English.
+            [result] = await self._translate_all(
+                [masked_narration], voice_language, best_effort=True
+            )
             if result is not None:
                 narration = restore_voice(
                     result, masked_narration, voice_glossary, voice_language, set()
@@ -227,8 +231,14 @@ class TranslationService:
             if (term.casefold(), language) in self._glossary
         }
 
-    async def _translate_all(self, items: list[MaskedText], language: str) -> list[str | None]:
-        """Translate and check each item; None where it still fails after one fix."""
+    async def _translate_all(
+        self, items: list[MaskedText], language: str, *, best_effort: bool = False
+    ) -> list[str | None]:
+        """Translate and check each item; None where it still fails after one fix.
+
+        With ``best_effort`` the attempt with the fewest problems is returned
+        instead of None, as long as it is a usable translation.
+        """
         drafts: list[str | None] = [None] * len(items)
         truncated = [False] * len(items)
         # Strings that are only placeholders, punctuation or blank need no translator.
@@ -275,6 +285,7 @@ class TranslationService:
                 else ["no translation was returned"]
             )
             if not problems:
+                self._note_names(item, draft)
                 return draft
             fixed = await self._llm_translate(item, language, problems)
             remaining = (
@@ -284,7 +295,18 @@ class TranslationService:
             )
             if not remaining:
                 self._event("fixed", item.source, problems)
+                self._note_names(item, fixed)
                 return fixed
+            if best_effort:
+                usable = [
+                    (found, text)
+                    for found, text in ((problems, draft), (remaining, fixed))
+                    if text and any(ch.isalpha() for ch in TOKEN.sub("", text))
+                ]
+                if usable:
+                    found, text = min(usable, key=lambda pair: len(pair[0]))
+                    self._event("kept_with_problems", item.source, found)
+                    return text
             self._event("fallback", item.source, remaining)
             return None
 
@@ -315,6 +337,11 @@ class TranslationService:
         except Exception as error:  # noqa: BLE001 - reported as a fallback by the caller
             logger.warning("LLM translation failed: %s", error)
             return None
+
+    def _note_names(self, item: MaskedText, translated: str) -> None:
+        missing = missing_names(item, translated)
+        if missing:
+            self._event("note", item.source, [f"name not found: {name}" for name in missing])
 
     def _event(self, status: str, source: str, problems: list[str]) -> None:
         self.events.append({"status": status, "text": source[:120], "problems": problems[:6]})

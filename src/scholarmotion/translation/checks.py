@@ -2,9 +2,10 @@
 
 No model is run on the translated text. Every placeholder must come back
 exactly once, the translator must not introduce digits of its own (all
-numbers are placeholders), each name must survive (verbatim, or transliterated
-and matched after romanizing with ``uroman``), and the output must be neither
-truncated nor left untranslated. Speech text must contain no digits or symbols.
+numbers are placeholders), and the output must be neither truncated nor left
+untranslated. Names are checked too (verbatim, or transliterated and matched
+after romanizing with ``uroman``) but only noted. Speech text must contain no
+digits or symbols.
 """
 
 from __future__ import annotations
@@ -46,18 +47,19 @@ def name_present(name: str, translated: str) -> bool:
     if roman is None:
         return True
     target = _letters(name)
+    if not target:
+        return True
     words = [_letters(roman.romanize_string(word)) for word in translated.split()]
     width = max(1, len(name.split()))
     windows = ("".join(words[i : i + width]) for i in range(max(1, len(words) - width + 1)))
-    return any(
-        difflib.SequenceMatcher(None, target, window).ratio() >= NAME_MATCH_RATIO
-        for window in windows
-        if window
-    )
 
+    def covered(window: str) -> float:
+        # Share of the name's letters found in order: tolerant of case endings
+        # added in agglutinative languages (Sodium -> sodiyattin).
+        blocks = difflib.SequenceMatcher(None, target, window).get_matching_blocks()
+        return sum(block.size for block in blocks) / len(target)
 
-def _has_digit(text: str) -> bool:
-    return any(unicodedata.category(ch) == "Nd" for ch in text)
+    return any(covered(window) >= NAME_MATCH_RATIO for window in windows if window)
 
 
 def translation_problems(
@@ -81,11 +83,11 @@ def translation_problems(
     unexpected = set(TOKEN.findall(translated)) - {item.token for item in masked.items}
     if unexpected:
         problems.append(f"unknown placeholders {sorted(unexpected)}")
-    if _has_digit(TOKEN.sub("", translated)):
-        problems.append("a number was added or changed (every number must stay a placeholder)")
-    for name in masked.names:
-        if not name_present(name, translated):
-            problems.append(f"the name {name!r} is missing")
+    added = sorted({ch for ch in TOKEN.sub("", translated) if unicodedata.category(ch) == "Nd"})
+    if added:
+        problems.append(
+            f"digits {' '.join(added)} were added (every number must stay a placeholder)"
+        )
     source_words = re.findall(r"[A-Za-z]{3,}", TOKEN.sub("", masked.text))
     if (
         target_language.strip().lower() not in {"english", "en"}
@@ -97,6 +99,15 @@ def translation_problems(
     if source_length >= 40 and len(TOKEN.sub("", translated)) < source_length * 0.3:
         problems.append("the translation is much shorter than the source")
     return problems
+
+
+def missing_names(masked: MaskedText, translated: str) -> list[str]:
+    """Names from the source not found in the translation.
+
+    Reported as notes, not failures: NER also tags capitalised common words,
+    so a missing "name" is not proof the translation is wrong.
+    """
+    return [name for name in masked.names if not name_present(name, translated)]
 
 
 def unspeakable(text: str) -> list[str]:

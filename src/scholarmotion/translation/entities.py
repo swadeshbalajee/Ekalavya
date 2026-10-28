@@ -20,7 +20,8 @@ from scholarmotion.translation.spoken import UNIT_NAMES, spoken_quantity
 
 logger = logging.getLogger(__name__)
 
-NAME_LABELS = {"PERSON", "ORG", "GPE", "LOC", "FAC", "PRODUCT", "WORK_OF_ART", "EVENT", "LAW"}
+# People, organisations and places; noisier labels (products, works, laws) are left out.
+NAME_LABELS = {"PERSON", "ORG", "GPE", "LOC", "FAC"}
 _UNIT_WORDS = sorted({*UNIT_NAMES, *UNIT_NAMES.values()}, key=len, reverse=True)
 _NUMBER = re.compile(
     r"(?<![\w.\]])"
