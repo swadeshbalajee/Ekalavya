@@ -62,7 +62,8 @@ def _rules(language: str) -> str:
         "[[ZQA]] stand for numbers, units, formulas and technical terms: copy every "
         "placeholder exactly once, unchanged, where it belongs in the sentence. Write no "
         "digits of your own. Keep each person, place and organisation name, written in "
-        f"{language} script or as given. Do not add or drop content."
+        f"{language} script or as given. Drop English articles (the, a) in front of a "
+        "placeholder when the target language has none. Do not add or drop content."
     )
 
 
@@ -255,6 +256,9 @@ class TranslationService:
         async def settle(index: int) -> str | None:
             item = items[index]
             draft = drafts[index]
+            if draft is None:
+                # No machine or batch result: the LLM makes the first attempt.
+                draft = await self._llm_translate(item, language, [])
             problems = (
                 translation_problems(
                     item, draft, target_language=language, truncated=truncated[index]
