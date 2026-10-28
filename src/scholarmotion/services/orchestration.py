@@ -10,7 +10,7 @@ import logging
 import re
 import tempfile
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -142,7 +142,11 @@ from scholarmotion.verification.aggregator import aggregate_reports
 from scholarmotion.verification.layout import verify_layout
 from scholarmotion.verification.math import verify_required_equations
 from scholarmotion.verification.pedagogy import verify_pedagogy, verify_rendered_storyboard
-from scholarmotion.verification.render import verify_no_raw_latex_text, verify_render
+from scholarmotion.verification.render import (
+    verify_cue_overflow,
+    verify_no_raw_latex_text,
+    verify_render,
+)
 from scholarmotion.verification.semantic import verify_source_grounding
 from scholarmotion.verification.visual import verify_visual
 
@@ -321,15 +325,30 @@ class BuildResult:
     lesson_review: dict = field(default_factory=dict)
 
 
-def _reject_incomplete_lesson(blocked_scenes: list[dict]) -> None:
-    """A playable partial export must never be reported as a finished lesson."""
-    if not blocked_scenes:
+def _reject_empty_lesson(scenes: list, blocked_scenes: list[dict]) -> None:
+    """Publish whatever scenes were produced; fail only when there is nothing at all.
+
+    A scene that still failed after every fallback is left out and reported to
+    the learner, rather than discarding the rest of a finished lesson.
+    """
+    if scenes:
         return
-    blocked_ids = ", ".join(item["scene_id"] for item in blocked_scenes)
-    raise RuntimeError(
-        "lesson build is incomplete; scenes failed verification or rendering: "
-        f"{blocked_ids}. No partial video was published."
-    )
+    blocked_ids = ", ".join(item["scene_id"] for item in blocked_scenes) or "all scenes"
+    raise RuntimeError(f"no scene could be produced ({blocked_ids}); nothing to publish.")
+
+
+def _read_log(path: str | None) -> str:
+    """The renderer's captured stdout/stderr, or empty when it is unavailable."""
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace") if path else ""
+    except OSError:
+        return ""
+
+
+def _attempt_rank(report: VerificationReport) -> tuple[int, int, float]:
+    """Sort key for rendered attempts: fewest critical, then high issues, then best score."""
+    severities = [issue.severity for issue in report.issues]
+    return (severities.count("critical"), severities.count("high"), -report.score)
 
 
 # Layout faults are placement problems: something overlaps, sits too low, or is
@@ -817,7 +836,7 @@ class ScholarMotionPipeline:
             await self._notify_progress(
                 "scene.blocked", blocked["scene_id"], {"reasons": [blocked["error"][:400]]}
             )
-        _reject_incomplete_lesson(blocked_scenes)
+        _reject_empty_lesson(scenes, blocked_scenes)
         voices = {
             (scene.audio.provider, scene.audio.model, scene.audio.voice_id)
             for scene in scenes
@@ -1049,6 +1068,9 @@ class ScholarMotionPipeline:
         # Best attempt that actually produced a video, kept so a scene whose only
         # remaining faults are cosmetic is not discarded along with its narration.
         fallback: tuple[str, VerificationReport, int, int, float | None] | None = None
+        # Best rendered attempt of any quality: shipped (marked degraded) only
+        # when neither a cosmetic-only attempt nor the safe scene is available.
+        best_any: tuple[str, VerificationReport, int, int, float | None] | None = None
         next_render_version = artifact_version
         timing_repaired = False
         for attempt in range(self.manager.max_repair_attempts + 1):
@@ -1126,6 +1148,11 @@ class ScholarMotionPipeline:
                     spec.scene_id, spec.equations, generated.python_code
                 ),
                 "semantic": verify_source_grounding(display_spec, known_source_ids or set()),
+                "cue_timing": verify_cue_overflow(
+                    spec.scene_id,
+                    _read_log(result.log_path),
+                    len(audio.sentence_timings) or 1,
+                ),
             }
             # Geometry measurements are hints for the repair prompt, not a verdict:
             # whether a scene looks right is decided by the video reviewer, which
@@ -1304,6 +1331,10 @@ class ScholarMotionPipeline:
             self._json(f"{base}/verification/v{render_version}.json", report)
             if result.video_path and _only_cosmetic(report):
                 fallback = (result.video_path, report, render_version, code_version, video_duration)
+            if result.video_path and (
+                best_any is None or _attempt_rank(report) < _attempt_rank(best_any[1])
+            ):
+                best_any = (result.video_path, report, render_version, code_version, video_duration)
             if report.passed and result.video_path:
                 render_path = result.video_path
                 events.append("scene.complete")
@@ -1446,8 +1477,80 @@ class ScholarMotionPipeline:
         if safe is not None:
             self._save_scene_result(project_id, safe)
             return safe
+        audio_version = artifact_version if existing_audio is None else max(1, artifact_version - 1)
+        if best_any is not None:
+            # Even the plain scene failed to render: the best real attempt is
+            # still better than losing this part of the lesson.
+            path, best_report, version, best_code_version, duration = best_any
+            await self._notify_progress(
+                "scene.degraded",
+                spec.scene_id,
+                {"reasons": ["best of the failed attempts", *_issue_reasons(best_report)]},
+            )
+            produced = ProducedScene(
+                spec,
+                str(self.storage.local_path(f"{base}/code/v{best_code_version}.py")),
+                audio,
+                path,
+                best_report,
+                version,
+                best_code_version,
+                audio_version,
+                duration,
+            )
+            self._save_scene_result(project_id, produced)
+            return produced
+        still = self._still_scene(project_id, spec, audio, report, next_render_version + 1)
+        if still is not None:
+            still = replace(still, audio_version=audio_version)
+            await self._notify_progress(
+                "scene.degraded", spec.scene_id, {"reasons": _issue_reasons(still.report)}
+            )
+            self._save_scene_result(project_id, still)
+            return still
         reasons = "; ".join(_issue_reasons(report)) if report else "unknown error"
         raise RuntimeError(f"{spec.scene_id} blocked after all repair attempts: {reasons}")
+
+    def _still_scene(
+        self,
+        project_id: str,
+        spec: SceneSpec,
+        audio: TTSResult,
+        last_report: VerificationReport | None,
+        render_version: int,
+    ) -> ProducedScene | None:
+        """Final fallback: the narration over a plain frame, made with FFmpeg only."""
+        if not hasattr(self.assembler, "still_scene"):
+            return None
+        base = f"{project_id}/scenes/{spec.scene_id}"
+        path = self.storage.local_path(f"{base}/render/v{render_version}/still.mp4")
+        duration = audio.duration_seconds or spec.duration_target_seconds
+        if not self.assembler.still_scene(path, duration):
+            return None
+        reasons = _issue_reasons(last_report) if last_report else ["the scene never rendered"]
+        report = VerificationReport(
+            scene_id=spec.scene_id,
+            passed=False,
+            score=0.1,
+            issues=[
+                VerificationIssue(
+                    scene_id=spec.scene_id,
+                    category="render.still_fallback",
+                    severity="medium",
+                    confidence=1.0,
+                    description=(
+                        "No animation could be rendered, so the narration plays over a plain "
+                        "frame: " + "; ".join(reasons)[:600]
+                    ),
+                    suggested_repair="Regenerate this scene from the editor.",
+                )
+            ],
+            layers={"render": True},
+        )
+        self._json(f"{base}/verification/v{render_version}.json", report)
+        return ProducedScene(
+            spec, "", audio, str(path), report, render_version, 0, 1, duration
+        )
 
     async def _render_safe_scene(
         self,

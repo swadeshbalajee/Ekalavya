@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from scholarmotion.manim_runtime.markers import CUE_OVERFLOW_MARKER
 from scholarmotion.media.math_notation import canonical_to_tex
 
 try:
@@ -60,6 +61,7 @@ class CueClock:
         self.cues = [max(0.2, float(value)) for value in cue_durations] or [1.0]
         self.index = 0
         self.used = 0.0
+        self.overflow = 0
 
     @property
     def remaining(self) -> float:
@@ -68,7 +70,16 @@ class CueClock:
         return max(0.0, self.cues[self.index] - self.used)
 
     def play(self, *animations, run_time: float = 1.0, **kwargs):
-        """Play within the current cue; long animations are shortened to fit it."""
+        """Play within the current cue; long animations are shortened to fit it.
+
+        After the last cue the narration has ended, so a new visual would only
+        flash and be cut off by the next scene. It is skipped instead, and the
+        renderer log records it so verification can ask for a repair.
+        """
+        if self.index >= len(self.cues):
+            self.overflow += 1
+            print(f"{CUE_OVERFLOW_MARKER} {self.overflow} {len(self.cues)}", flush=True)
+            return
         budget = self.remaining
         duration = max(0.25, min(run_time, budget - 0.05)) if budget > 0.3 else 0.25
         self.scene.play(*animations, run_time=duration, **kwargs)

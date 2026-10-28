@@ -120,6 +120,15 @@ def _verification_chat_summary(result: BuildResult) -> tuple[str, dict]:
             else f"{issue_count} non-blocking verification finding(s) are recorded for review."
         )
     )
+    degraded = [scene.spec.scene_id for scene in result.scenes if not scene.report.passed]
+    if degraded:
+        summary += (
+            f" Scene(s) {', '.join(degraded)} did not pass every check after all repairs; the "
+            "best available version is shown and can be regenerated from the editor."
+        )
+    if result.blocked_scenes:
+        missing = ", ".join(item["scene_id"] for item in result.blocked_scenes)
+        summary += f" Scene(s) {missing} could not be produced and are left out of this video."
     review = result.lesson_review or {}
     problems = [str(problem) for problem in review.get("problems") or []]
     if problems:
@@ -133,6 +142,8 @@ def _verification_chat_summary(result: BuildResult) -> tuple[str, dict]:
         "subtitle_formats": ["srt", "vtt"],
         "passed_layers": layer_names,
         "issue_count": issue_count,
+        "degraded_scenes": degraded,
+        "missing_scenes": [item["scene_id"] for item in result.blocked_scenes],
     }
 
 

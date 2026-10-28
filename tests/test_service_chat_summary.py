@@ -46,6 +46,8 @@ def test_completion_summary_exposes_duration_subtitles_and_quality_layers():
         "subtitle_formats": ["srt", "vtt"],
         "passed_layers": ["layout", "math", "render"],
         "issue_count": 0,
+        "degraded_scenes": [],
+        "missing_scenes": [],
     }
 
 

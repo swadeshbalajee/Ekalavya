@@ -2,14 +2,21 @@
 
 When repairs run out, dropping the scene also deletes its narration and audio
 from the lesson. A scene that rendered and only has placement faults is worth
-keeping; one that crashed or teaches something wrong is not.
+keeping as-is; otherwise the plain safe scene, then the best rendered attempt,
+then a still frame under the narration keep the lesson complete.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from scholarmotion.services.orchestration import _only_cosmetic, _reject_incomplete_lesson
+from scholarmotion.media.ffmpeg import FFmpegAssembler
+from scholarmotion.schemas import VerificationIssue, VerificationReport
+from scholarmotion.services.orchestration import (
+    _attempt_rank,
+    _only_cosmetic,
+    _reject_empty_lesson,
+)
 
 
 class _Issue:
@@ -56,10 +63,48 @@ def test_missing_or_clean_report_is_not_a_fallback():
     assert _only_cosmetic(_Report([])) is False
 
 
-def test_blocked_scene_prevents_publishing_a_partial_lesson():
-    with pytest.raises(RuntimeError, match="incomplete.*S03.*No partial video"):
-        _reject_incomplete_lesson([{"scene_id": "S03"}])
+def _report(score: float, *severities: str) -> VerificationReport:
+    return VerificationReport(
+        scene_id="S01",
+        passed=False,
+        score=score,
+        issues=[
+            VerificationIssue(
+                scene_id="S01",
+                category="video.mismatch",
+                severity=severity,
+                confidence=1,
+                description="x",
+                suggested_repair="y",
+            )
+            for severity in severities
+        ],
+    )
 
 
-def test_complete_scene_set_can_be_published():
-    _reject_incomplete_lesson([])
+def test_best_attempt_has_fewest_serious_issues_then_highest_score():
+    attempts = [
+        _report(0.9, "critical"),
+        _report(0.4, "high", "high"),
+        _report(0.5, "high"),
+        _report(0.7, "high"),
+    ]
+    assert min(attempts, key=_attempt_rank).score == 0.7
+
+
+def test_a_partial_lesson_is_published_when_some_scenes_exist():
+    _reject_empty_lesson(["S01"], [{"scene_id": "S03"}])
+
+
+def test_only_an_empty_lesson_fails():
+    with pytest.raises(RuntimeError, match="no scene could be produced.*S03"):
+        _reject_empty_lesson([], [{"scene_id": "S03"}])
+
+
+@pytest.mark.media
+def test_still_scene_is_a_playable_clip_of_the_narration_length(tmp_path):
+    assembler = FFmpegAssembler(mock_missing=False)
+    path = tmp_path / "still.mp4"
+    if not assembler.still_scene(path, 2.0):
+        pytest.skip("ffmpeg unavailable")
+    assert abs(assembler.probe_duration(str(path)) - 2.0) < 0.2
