@@ -3,8 +3,8 @@
 English source text is analysed before translation. Numbers (with their unit,
 percent or power), equations and the lesson's key STEM terms are replaced by
 placeholders, so no translator can alter them, and restored afterwards in the
-form each copy needs: digits and ``English term (native term)`` on screen,
-number words in the narration language for speech. Names of people, places and
+form each copy needs: digits and ``English term (native term)`` on screen;
+number words in the narration language and the English term alone for speech. Names of people, places and
 organisations are found with spaCy's small English NER model and are left for
 the translator to render, then checked (see :mod:`.checks`).
 """
@@ -157,27 +157,14 @@ def restore_screen(translated: str, masked: MaskedText, glossary: dict[str, str]
     return TOKEN.sub(put, translated)
 
 
-def restore_voice(
-    translated: str,
-    masked: MaskedText,
-    glossary: dict[str, str],
-    language: str,
-    mentioned: set[str],
-) -> str:
-    """Narration copy: numbers as words in ``language``; a term's native name on first mention."""
+def restore_voice(translated: str, masked: MaskedText, language: str) -> str:
+    """Narration copy: numbers as words in ``language``; STEM terms spoken in English only."""
 
     def put(match: re.Match) -> str:
         item = masked.item(match.group(0))
         if item is None:
             return match.group(0)
-        if item.kind == "term":
-            key = item.text.casefold()
-            native = glossary.get(key)
-            if native and key not in mentioned:
-                mentioned.add(key)
-                return f"{item.text}, {native}"
-            return item.text
-        if item.kind == "equation":
+        if item.kind in {"term", "equation"}:
             return item.text
         try:
             return spoken_quantity(item.number, item.unit, language, kind=item.kind)

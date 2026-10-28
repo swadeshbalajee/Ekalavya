@@ -40,7 +40,7 @@ Named after Ekalavya, the self-taught archer of the Mahabharata who learned by w
   - names are found with spaCy's small English NER model;
   - each result is checked by matching (placeholders intact, no invented digits, names present, possibly after romanizing a transliteration, not cut off or left untranslated);
   - a failed line gets one corrected retry, otherwise screen text stays in English.
-- **STEM terms in English.** On screen a term reads `photoelectric effect (ஒளிமின் விளைவு)`.
+- **STEM terms in English.** On screen a term reads `photoelectric effect (ஒளிமின் விளைவு)`; the narration says only the English term.
 - **Numbers spoken properly.** The narration says numbers as words in its own language ("ஆயிரத்து தொள்ளாயிரத்து ஐந்து" for 1905) and units by name, while the screen keeps digits.
 - **Bodhan AI.** With a Bodhan key, translation and narration for Indian languages use Bodhan's Indic models, with one female voice per language; everything else stays on OpenRouter.
 

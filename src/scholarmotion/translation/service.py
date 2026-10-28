@@ -164,7 +164,6 @@ class TranslationService:
             ]
         narration = spec.narration
         if not _is_english(voice_language):
-            voice_glossary = await self.glossary(terms, voice_language)
             masked_narration = protect(spec.narration)
             # Speech must be in the narration language: keep the best attempt
             # rather than falling back to English.
@@ -172,9 +171,7 @@ class TranslationService:
                 [masked_narration], voice_language, best_effort=True
             )
             if result is not None:
-                narration = restore_voice(
-                    result, masked_narration, voice_glossary, voice_language, set()
-                )
+                narration = restore_voice(result, masked_narration, voice_language)
             leftover = unspeakable(narration)
             if leftover:
                 self._event(

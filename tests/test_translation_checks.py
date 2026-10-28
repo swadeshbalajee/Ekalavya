@@ -48,14 +48,13 @@ def test_screen_copy_keeps_digits_and_shows_the_english_term_with_its_native_nam
     assert "photoelectric effect (ஒளிமின் விளைவு)" in screen
 
 
-def test_voice_copy_says_numbers_in_the_narration_language():
+def test_voice_copy_says_numbers_in_the_narration_language_and_terms_in_english_only():
     masked = mask(LINE, key_terms=["photoelectric effect"])
-    voice = restore_voice(
-        masked.text, masked, {"photoelectric effect": "ஒளிமின் விளைவு"}, "Tamil", set()
-    )
+    voice = restore_voice(masked.text, masked, "Tamil")
     assert "ஆயிரத்து தொள்ளாயிரத்து ஐந்து" in voice
     assert "ஐந்நூறு nanometres" in voice
-    assert "photoelectric effect, ஒளிமின் விளைவு" in voice
+    assert "photoelectric effect" in voice
+    assert "(" not in voice and "ஒளிமின்" not in voice
     assert unspeakable(voice) == []
 
 
