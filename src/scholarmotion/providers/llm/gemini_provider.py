@@ -66,7 +66,14 @@ class GeminiProvider:
     name = "gemini"
     frame_only_video_review = True
 
-    def __init__(self, *, api_key: str, model: str, fallback_model: str | None = None):
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        fallback_model: str | None = None,
+        default_temperature: float = 0.7,
+    ):
         try:
             from google import genai
             from google.genai import types
@@ -76,9 +83,12 @@ class GeminiProvider:
         self.types = types
         self.model = model
         self.fallback_model = fallback_model if fallback_model != model else None
+        self.default_temperature = default_temperature
         self.capabilities = LLMCapabilities(images=True, video_frames=True)
 
     def _config(self, *, reasoning_effort: str | None = None, **values):
+        if values.get("temperature") is None:
+            values["temperature"] = getattr(self, "default_temperature", 0.7)
         # Gemini 3.x rejects legacy sampling parameters such as temperature.
         # Keep Flash calls economical unless an agent explicitly requests
         # deeper reasoning for pedagogical planning.
@@ -217,7 +227,7 @@ class GeminiProvider:
         keyframes: list[bytes] | None = None,
         timestamp_offset_seconds: float = 0,
         excerpt_duration_seconds: float | None = None,
-        temperature: float = 0,
+        temperature: float | None = None,
     ) -> dict[str, Any]:
         """Review sampled video frames against the narration/cue context.
 

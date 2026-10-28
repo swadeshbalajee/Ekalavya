@@ -1689,7 +1689,6 @@ class ScholarMotionPipeline:
                     + "\n"
                     + outline,
                     LessonFlowReview,
-                    temperature=0,
                 )
         except Exception as error:  # noqa: BLE001 - review must never discard a built video
             logger.warning("Lesson flow review unavailable: %s", error)

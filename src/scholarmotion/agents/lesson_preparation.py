@@ -49,6 +49,11 @@ class LessonPreparation(BaseModel):
     source_scope: Literal["none", "not_said", "only_given", "given_plus_web"] = "none"
     # Video edits: which scenes (ids from VIDEO SCENES) or which time range, and what to change.
     target_scenes: list[str] = Field(default_factory=list)
+    # The change or language switch applies to the whole video.
+    whole_video: bool = False
+    # What the planner says to the learner: a confirmation of the action, or a
+    # clarifying question when it chose to ask instead of act.
+    reply: str = ""
     # Which video the learner means when the chat has several (VIDEO VERSIONS); empty = current.
     target_video_version: int | None = None
     edit_start_seconds: float | None = None
@@ -150,6 +155,7 @@ async def prepare_lesson(
     video_scenes: list[dict] | None = None,
     video_versions: list[dict] | None = None,
     input_language_hint: str | None = None,
+    video_status: str = "no video yet",
 ) -> LessonPreparation:
     """Let the planner model decide what this turn asks for, then validate it."""
     fallback = fallback_preparation(
@@ -184,6 +190,15 @@ Return these decisions:
 - target_scenes: for edit_video and localize_video, the ids from VIDEO SCENES the learner means
   (by number, position such as 'the last one', title, content or time). Use an empty list when
   the request is about the whole video or is given only as a time range.
+- whole_video: true when an edit_video or localize_video request is about the entire video
+  ('edit the whole video', 'redo everything', 'make it all Tamil').
+- reply: what you say to the learner, in English, in one or two sentences.
+  * For generate_video, edit_video and localize_video: confirm what will happen (which scenes or
+    the whole video, the change, the language), taking VIDEO STATUS into account: while a video
+    is still being produced, say the change can be made once it is ready.
+  * When you cannot tell what the learner wants changed, or a lesson from given material has
+    source_scope not_said, choose action answer and ask a short clarifying question here.
+  * Leave it empty for any other answer; the tutor writes that reply.
 - target_video_version: for edit_video and localize_video, the version from VIDEO VERSIONS the
   learner means when it is not the current one ('the previous video', 'the English one', 'the
   first version'); empty for the current video. VIDEO SCENES describes the current video; an
@@ -243,6 +258,7 @@ SAVED LEARNER CONTEXT (empty means none has been configured):
 {context}
 RECENT CONVERSATION (oldest first):
 {conversation or "(none)"}
+VIDEO STATUS: {video_status}
 VIDEO SCENES (the finished video this conversation currently shows):
 {_scene_lines(video_scenes)}
 VIDEO VERSIONS (every video made in this conversation, oldest first):
@@ -257,7 +273,7 @@ ATTACHED SOURCES (papers and web pages already read into this chat):
 {", ".join(attached_sources or []) or "(none)"}
 """
     try:
-        result = await llm.generate_structured(prompt, LessonPreparation, temperature=0)
+        result = await llm.generate_structured(prompt, LessonPreparation)
     except Exception:  # noqa: BLE001 - an outage must leave the safe text-answer path usable
         return fallback
     result = _validated(
@@ -302,6 +318,7 @@ def _validated(
     result.retrieval_query = result.retrieval_query.strip() or fallback.retrieval_query
     known = {str(scene["id"]) for scene in video_scenes}
     result.target_scenes = [item for item in result.target_scenes if item in known]
+    result.reply = result.reply.strip()
     if result.action in {"edit_video", "localize_video"} and not video_scenes:
         result.action = "answer"
     if result.duration_minutes is not None:

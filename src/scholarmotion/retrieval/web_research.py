@@ -33,7 +33,6 @@ async def web_research(
     try:
         text, sources = await llm.generate_text_with_sources(
             prompt,
-            temperature=0,
             reasoning_effort=reasoning_effort,
             web_search=True,
             max_results=max_results,

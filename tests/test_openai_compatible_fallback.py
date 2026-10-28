@@ -164,9 +164,9 @@ async def test_video_review_sends_paired_media_and_normalizes_absolute_issue_tim
     assert [part["type"] for part in content] == ["text", "video_url", "input_audio", "image_url"]
     assert captured["reasoning_effort"] == "low"
     assert captured["response_format"] == {"type": "json_object"}
-    assert result["issues"][0]["category"] == "video.overlap"
-    assert result["issues"][0]["severity"] == "high"
-    assert result["issues"][0]["category"] == "video.overlap"
+    # The reviewer's own category stands; no keyword rule re-labels it.
+    assert result["issues"][0]["category"] == "video.unreadable_text"
+    assert result["issues"][0]["severity"] == "medium"
     assert "9.5-11.0s" in result["issues"][0]["description"]
     assert result["issues"][0]["suggested_repair"] == "Move equation below the title"
 

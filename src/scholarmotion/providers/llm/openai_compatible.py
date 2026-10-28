@@ -37,6 +37,7 @@ class OpenAICompatibleProvider:
         reasoning_effort: str = "low",
         code_max_output_tokens: int = 6000,
         structured_reasoning_effort: str = "high",
+        default_temperature: float = 0.7,
     ):
         try:
             from openai import AsyncOpenAI
@@ -51,10 +52,15 @@ class OpenAICompatibleProvider:
         self.reasoning_effort = reasoning_effort
         self.code_max_output_tokens = code_max_output_tokens
         self.structured_reasoning_effort = structured_reasoning_effort
+        self.default_temperature = default_temperature
         self.fallback_models = [
             candidate for candidate in (fallback_models or []) if candidate != model
         ]
         self.capabilities = LLMCapabilities(images=supports_images)
+
+    def _temperature(self, value: float | None) -> float:
+        """The caller's temperature, else the configured agent temperature."""
+        return getattr(self, "default_temperature", 0.7) if value is None else value
 
     @property
     def _provider_label(self) -> str:
@@ -157,7 +163,7 @@ class OpenAICompatibleProvider:
                 model=model,
                 input=prompt,
                 text_format=output_schema,
-                temperature=temperature,
+                temperature=self._temperature(temperature),
                 **({"reasoning": reasoning} if reasoning else {}),
             ),
             purpose=purpose or "structured",
@@ -207,7 +213,7 @@ class OpenAICompatibleProvider:
             lambda model: self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": content}],
-                temperature=0,
+                temperature=self._temperature(None),
                 max_tokens=32000,
                 extra_body={
                     "reasoning": {"effort": "medium"},
@@ -237,7 +243,10 @@ class OpenAICompatibleProvider:
         )
         response = await self._with_fallback(
             lambda model: self.client.responses.create(
-                model=model, input=prompt, temperature=temperature, **request_options
+                model=model,
+                input=prompt,
+                temperature=self._temperature(temperature),
+                **request_options,
             ),
             purpose=purpose or "text",
         )
@@ -262,7 +271,7 @@ class OpenAICompatibleProvider:
             lambda model: self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
+                temperature=self._temperature(temperature),
                 **({"extra_body": extra_body} if extra_body else {}),
             ),
             timeout_seconds=180,
@@ -326,7 +335,7 @@ class OpenAICompatibleProvider:
                 lambda model: self.client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": content}],
-                    temperature=temperature,
+                    temperature=self._temperature(temperature),
                     max_tokens=self.code_max_output_tokens,
                     extra_body={
                         "reasoning": {"effort": self.reasoning_effort},
@@ -348,7 +357,7 @@ class OpenAICompatibleProvider:
             lambda model: self.client.responses.create(
                 model=model,
                 input=prompt,
-                temperature=temperature,
+                temperature=self._temperature(temperature),
                 **request_options,
             ),
             validator=lambda result: _is_manim_code(result.output_text),
@@ -381,7 +390,7 @@ class OpenAICompatibleProvider:
             lambda model: self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": content}],
-                temperature=temperature,
+                temperature=self._temperature(temperature),
                 max_tokens=4096,
                 **request_options,
             ),
@@ -438,7 +447,7 @@ class OpenAICompatibleProvider:
         keyframes: list[bytes] | None = None,
         timestamp_offset_seconds: float = 0,
         excerpt_duration_seconds: float | None = None,
-        temperature: float = 0,
+        temperature: float | None = None,
     ) -> dict[str, Any]:
         """Review a rendered scene together with its exact narration audio."""
         if not self.openrouter:
@@ -468,7 +477,7 @@ class OpenAICompatibleProvider:
                 lambda model: self.client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": content}],
-                    temperature=temperature,
+                    temperature=self._temperature(temperature),
                     max_tokens=4096,
                     reasoning_effort=self.reasoning_effort,
                     response_format={"type": "json_object"},
@@ -542,33 +551,11 @@ class OpenAICompatibleProvider:
                 )
             )
             raw_category = str(issue.get("category", issue.get("type", "quality"))).lower()
-            diagnostic_text = f"{raw_category} {observed}".lower()
-            if any(word in diagnostic_text for word in ("overlap", "obscur", "collid", "covered")):
-                category = "overlap"
-            elif any(
-                word in diagnostic_text for word in ("audio_video", "audio/video", "sync", "timing")
-            ):
-                category = "audio_video_sync"
-            elif any(
-                word in diagnostic_text
-                for word in ("unreadable", "readability", "clipped", "tiny text")
-            ):
-                category = "readability"
-            elif any(
-                word in diagnostic_text for word in ("mismatch", "not shown", "missing visual")
-            ):
-                category = "semantic_visual_mismatch"
-            else:
-                category = re.sub(r"[^a-z0-9_.]", "_", raw_category)
+            # The reviewer's own category and severity stand; only their spelling is normalized.
+            category = re.sub(r"[^a-z0-9_.]", "_", raw_category.strip())
             severity = str(issue.get("severity", "")).lower()
             if severity not in {"low", "medium", "high", "critical"}:
-                severity = (
-                    "high"
-                    if category in {"overlap", "audio_video_sync", "semantic_visual_mismatch"}
-                    else "medium"
-                )
-            elif category == "overlap" and severity in {"low", "medium"}:
-                severity = "high"
+                severity = "medium"
             start = issue.get("timestamp_start_seconds", issue.get("start_seconds"))
             end = issue.get("timestamp_end_seconds", issue.get("end_seconds"))
             if start is None or end is None:

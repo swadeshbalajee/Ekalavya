@@ -57,14 +57,20 @@ def _is_english(language: str | None) -> bool:
     return not language or language.strip().lower() in {"en", "eng", "english"}
 
 
-def _rules(language: str) -> str:
+def _rules(language: str, items: list[MaskedText]) -> str:
+    """Translation instructions; placeholders are described only when the text has some."""
+    placeholders = (
+        " Placeholders such as [[ZQA]] stand for numbers, units, formulas and technical terms: "
+        "copy every placeholder exactly once, unchanged, where it belongs in the sentence. Write "
+        "no digits of your own. Drop English articles (the, a) in front of a placeholder when "
+        f"{language} has none."
+        if any(item.items for item in items)
+        else " Do not add square brackets or any markup."
+    )
     return (
-        f"Translate from English to {language} for a STEM lesson. Placeholders such as "
-        "[[ZQA]] stand for numbers, units, formulas and technical terms: copy every "
-        "placeholder exactly once, unchanged, where it belongs in the sentence. Write no "
-        "digits of your own. Keep each person, place and organisation name, written in "
-        f"{language} script or as given. Drop English articles (the, a) in front of a "
-        "placeholder when the target language has none. Do not add or drop content."
+        f"Translate into {language} for a STEM lesson.{placeholders} Keep each person, place and "
+        f"organisation name, written in {language} script or as given. Do not add or drop "
+        "content."
     )
 
 
@@ -216,7 +222,7 @@ class TranslationService:
                 "exactly as given.\n" + "\n".join(f"- {term}" for term in missing)
             )
             try:
-                result = await self.provider.generate_structured(prompt, _Glossary, temperature=0)
+                result = await self.provider.generate_structured(prompt, _Glossary)
                 for entry in result.terms:
                     if entry.english in missing and _usable_term(entry.english, entry.native):
                         self._glossary[(entry.english.casefold(), language)] = entry.native.strip()
@@ -256,13 +262,13 @@ class TranslationService:
             await asyncio.gather(*(run(index) for index in range(len(items))))
         elif len(items) > 1 and hasattr(self.provider, "generate_structured"):
             prompt = (
-                _rules(language)
+                _rules(language, items)
                 + f"\nTranslate each string in the JSON list; return exactly {len(items)} "
                 "translations in the same order.\n"
                 + json.dumps([item.text for item in items], ensure_ascii=False)
             )
             try:
-                batch = await self.provider.generate_structured(prompt, _Batch, temperature=0)
+                batch = await self.provider.generate_structured(prompt, _Batch)
                 if len(batch.translations) == len(items):
                     drafts = list(batch.translations)
             except Exception as error:  # noqa: BLE001 - each string is retried alone below
@@ -325,12 +331,12 @@ class TranslationService:
             else ""
         )
         prompt = (
-            f"{_rules(language)}{feedback}\nReturn only the translation, with no notes.\n\n"
+            f"{_rules(language, [item])}{feedback}\nReturn only the translation, with no notes.\n\n"
             f"TEXT:\n{item.text}"
         )
         try:
             async with self._limit:
-                return (await self.provider.generate_text(prompt, temperature=0)).strip()
+                return (await self.provider.generate_text(prompt)).strip()
         except Exception as error:  # noqa: BLE001 - reported as a fallback by the caller
             logger.warning("LLM translation failed: %s", error)
             return None

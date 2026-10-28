@@ -233,6 +233,7 @@ async def respond(
         video_scenes=planner_scenes(scenes),
         video_versions=await video_history(session, project),
         input_language_hint=payload.language,
+        video_status=_video_status(project.status),
     )
     canonical = (
         preparation.canonical_message
@@ -280,7 +281,8 @@ async def respond(
             session,
             translator,
             project,
-            canonical=f"I've read {named}. Should the video use only {this}, or may I also add "
+            canonical=preparation.reply
+            or f"I've read {named}. Should the video use only {this}, or may I also add "
             f'outside sources from the web to fill gaps? Reply "only {this}" or "add outside '
             "sources\", and I'll start the video.",
             action="answer",
@@ -293,7 +295,8 @@ async def respond(
                 session,
                 translator,
                 project,
-                canonical="The lesson is still being produced. I can change it as soon as the "
+                canonical=preparation.reply
+                or "The lesson is still being produced. I can change it as soon as the "
                 "video is ready.",
                 action="wait",
             )
@@ -324,7 +327,8 @@ async def respond(
                 session,
                 translator,
                 project,
-                canonical=(
+                canonical=preparation.reply
+                or (
                     "I will make a new video for this. The earlier video stays available in "
                     "this chat. You can keep chatting while the scenes are generated and verified."
                     if had_video
@@ -338,7 +342,8 @@ async def respond(
                 session,
                 translator,
                 project,
-                canonical="I am preparing your lesson. Ask a question now, or ask for a change "
+                canonical=preparation.reply
+                or "I am preparing your lesson. Ask a question now, or ask for a change "
                 "once the video is ready.",
                 action="wait",
             )
@@ -346,6 +351,16 @@ async def respond(
     if project.status != "COMPLETE":
         # Before a video exists, the chat's languages follow the learner's choice.
         project.text_language, project.voice_language = text_language, voice_language
+    if preparation.action == "answer" and preparation.reply:
+        # The planner chose to ask the learner something before acting.
+        return await _save_assistant(
+            session,
+            translator,
+            project,
+            canonical=preparation.reply,
+            action="answer",
+            language=text_language,
+        )
     answer, checks = await _tutor_answer(
         session, settings, project, payload, conversation, canonical, prior_messages
     )
@@ -475,27 +490,50 @@ async def _default_languages(
     return payload.text_language or text, payload.voice_language or voice
 
 
+def _video_status(status: str) -> str:
+    """The project's state in words the planner can reason about."""
+    return {
+        "COMPLETE": "a finished video is ready",
+        "GENERATING": "a video is still being produced",
+        "EDITING": "the video is being changed",
+        "LOCALIZING": "the video's language is being changed",
+        "FAILED": "the last video build failed",
+    }.get(status, "no video yet")
+
+
 def edit_range_for(preparation, scenes: list[Scene]) -> tuple[float, float] | None:
-    """The time range a planner edit refers to, validated against the real video."""
+    """The time range a planner edit refers to, validated against the real video.
+
+    Scenes or a time range the planner named come first. Otherwise the edit
+    applies to the whole video: had the planner been unsure which part was
+    meant, it would have asked rather than chosen edit_video.
+    """
+    if not scenes:
+        return None
     chosen = [scene for scene in scenes if scene.scene_key in set(preparation.target_scenes)]
-    if chosen:
+    if chosen and not preparation.whole_video:
         return min(s.timeline_start for s in chosen), max(s.timeline_end for s in chosen)
     start, end = preparation.edit_start_seconds, preparation.edit_end_seconds
-    length = max((scene.timeline_end for scene in scenes), default=0.0)
-    if start is not None and end is not None and 0 <= start < end <= length + 1:
-        return float(start), float(min(end, length))
-    return None
+    length = max(scene.timeline_end for scene in scenes)
+    if not preparation.whole_video and start is not None and end is not None:
+        # A named time range must lie inside the real video.
+        if 0 <= start < end <= length + 1:
+            return float(start), float(min(end, length))
+        return None
+    return min(scene.timeline_start for scene in scenes), length
 
 
 async def _edit(session, translator, project, preparation, scenes, canonical) -> TutorDecision:
     span = edit_range_for(preparation, scenes)
     if span is None:
+        # Only reached when the named time range lies outside the video.
+        length = max((scene.timeline_end for scene in scenes), default=0.0)
         return await _save_assistant(
             session,
             translator,
             project,
-            canonical="Which part of the video should I change? You can name a scene, describe "
-            "it, or give a time range.",
+            canonical=f"The video is {length:.0f} seconds long, so that time range is outside "
+            "it. Which part should I change?",
             action="answer",
         )
     start, end = span
@@ -507,7 +545,8 @@ async def _edit(session, translator, project, preparation, scenes, canonical) ->
         session,
         translator,
         project,
-        canonical=f"I will update {label} and rebuild only {'it' if len(numbers) == 1 else 'them'}.",
+        canonical=preparation.reply
+        or f"I will update {label} and rebuild only {'it' if len(numbers) == 1 else 'them'}.",
         action="edit_range",
         start=start,
         end=end,
@@ -524,30 +563,25 @@ async def _edit(session, translator, project, preparation, scenes, canonical) ->
 
 async def _localize(session, translator, project, preparation, scenes) -> TutorDecision:
     language = preparation.text_language
-    chosen = [scene for scene in scenes if scene.scene_key in set(preparation.target_scenes)]
-    if len(chosen) > 1:
-        names = ", ".join(str(scenes.index(scene) + 1) for scene in chosen)
-        return await _save_assistant(
-            session,
-            translator,
-            project,
-            canonical=f"I can change the language of one scene at a time. Which scene should I "
-            f"explain in {language} first: {names}?",
-            action="answer",
-        )
+    chosen = (
+        []
+        if preparation.whole_video
+        else [scene for scene in scenes if scene.scene_key in set(preparation.target_scenes)]
+    )
     # The localize workflows read the project languages.
     project.text_language, project.voice_language = language, preparation.voice_language
-    if chosen:
-        scene = chosen[0]
+    if chosen and len(chosen) < len(scenes):
+        numbers = ", ".join(str(scenes.index(scene) + 1) for scene in chosen)
+        label = f"scene{'s' if len(chosen) > 1 else ''} {numbers}"
         confirmation = await _save_assistant(
             session,
             translator,
             project,
-            canonical=f"I will explain scene {scenes.index(scene) + 1} in {language} and keep "
-            "the other scenes as they are.",
+            canonical=preparation.reply
+            or f"I will explain {label} in {language} and keep the other scenes as they are.",
             action="localize_scene",
-            start=scene.timeline_start,
-            end=scene.timeline_end,
+            start=min(scene.timeline_start for scene in chosen),
+            end=max(scene.timeline_end for scene in chosen),
         )
         return TutorDecision(
             confirmation.message,
@@ -555,13 +589,14 @@ async def _localize(session, translator, project, preparation, scenes) -> TutorD
             "localize_scene",
             confirmation.start,
             confirmation.end,
-            scene.scene_key,
+            ",".join(scene.scene_key for scene in chosen),
         )
     return await _save_assistant(
         session,
         translator,
         project,
-        canonical="I will regenerate the visible lesson text and narration in the selected "
+        canonical=preparation.reply
+        or "I will regenerate the visible lesson text and narration in the selected "
         "languages while preserving the English lesson plan and source grounding.",
         action="localize",
     )

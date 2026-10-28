@@ -107,7 +107,7 @@ async def _plan_batch(
         f"{lesson_outline}\n\nReturn the scenes list."
     )
     try:
-        raw = await provider.generate_text(prompt, temperature=0, reasoning_effort="high")
+        raw = await provider.generate_text(prompt, reasoning_effort="high")
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
         lesson_plan = LessonVisualPlan.model_validate(json.loads(cleaned))
         return {plan.block_id: plan for plan in lesson_plan.scenes}

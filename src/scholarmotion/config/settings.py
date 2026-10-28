@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     main_llm_fallback_models: str = ""
     main_llm_base_url: str | None = None
     main_llm_temperature: float = 0.2
+    # Sampling temperature for every agent call (planner, script, storyboard,
+    # code, translation, reviews) unless a call sets its own.
+    agent_temperature: float = Field(default=0.7, ge=0, le=2)
     # Thinking budget for the main model's structured outputs (script drafts
     # and reviews). Reasoning tokens bill as output tokens.
     main_llm_structured_reasoning_effort: str = Field(default="high", pattern="^(low|medium|high)$")

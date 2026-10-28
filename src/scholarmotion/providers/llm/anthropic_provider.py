@@ -15,20 +15,21 @@ T = TypeVar("T", bound=BaseModel)
 class AnthropicProvider:
     name = "anthropic"
 
-    def __init__(self, *, api_key: str, model: str):
+    def __init__(self, *, api_key: str, model: str, default_temperature: float = 0.7):
         try:
             from anthropic import AsyncAnthropic
         except ImportError as exc:
             raise RuntimeError("install scholarmotion[llm] for Anthropic") from exc
         self.client = AsyncAnthropic(api_key=api_key)
         self.model = model
+        self.default_temperature = default_temperature
         self.capabilities = LLMCapabilities(images=True)
 
     async def generate_text(self, prompt: str, *, temperature: float | None = None) -> str:
         result = await self.client.messages.create(
             model=self.model,
             max_tokens=8192,
-            temperature=temperature or 0,
+            temperature=self.default_temperature if temperature is None else temperature,
             messages=[{"role": "user", "content": prompt}],
         )
         return "".join(

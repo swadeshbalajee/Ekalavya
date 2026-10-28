@@ -72,7 +72,7 @@ class DecidingPlanner:
     def __init__(self, **decision):
         self.decision = decision
 
-    async def generate_structured(self, _prompt, schema, *, temperature):
+    async def generate_structured(self, _prompt, schema, *, temperature=None):
         return schema(**{"canonical_message": "turn", **self.decision})
 
     async def generate_text(self, _prompt, **_kwargs):
@@ -124,7 +124,7 @@ async def test_script_equations_are_structured_and_reach_immutable_scene_specs()
     class StructuredScriptProvider:
         name = "test"
 
-        async def generate_structured(self, _prompt, schema, *, temperature):
+        async def generate_structured(self, _prompt, schema, *, temperature=None):
             if schema.__name__ == "ScriptReview":
                 return schema(approved=True, problems=[])
             return schema(

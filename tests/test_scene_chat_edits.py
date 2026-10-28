@@ -35,7 +35,7 @@ class _Planner:
     def __init__(self, **decision):
         self.decision = decision
 
-    async def generate_structured(self, _prompt, schema, *, temperature):
+    async def generate_structured(self, _prompt, schema, *, temperature=None):
         return schema(**{"canonical_message": "turn", **self.decision})
 
 
@@ -118,11 +118,52 @@ async def test_a_scene_edit_rebuilds_that_scenes_time_range(monkeypatch, session
 
 
 @pytest.mark.asyncio
-async def test_an_edit_the_planner_cannot_place_asks_which_part(monkeypatch, session):
+async def test_an_edit_of_the_whole_video_rebuilds_every_scene(monkeypatch, session):
+    project = await _finished_project(session)
+    decision = await _respond(monkeypatch, session, project, action="edit_video", whole_video=True)
+    assert decision.action == "edit_range"
+    assert (decision.start, decision.end) == (0, 91)
+
+
+@pytest.mark.asyncio
+async def test_an_edit_with_no_part_named_applies_to_the_whole_video(monkeypatch, session):
     project = await _finished_project(session)
     decision = await _respond(monkeypatch, session, project, action="edit_video")
-    assert decision.action == "answer"
-    assert "Which part" in decision.canonical_message
+    assert decision.action == "edit_range"
+    assert (decision.start, decision.end) == (0, 91)
+
+
+@pytest.mark.asyncio
+async def test_the_planners_own_words_are_the_reply(monkeypatch, session):
+    project = await _finished_project(session)
+    asked = await _respond(
+        monkeypatch, session, project, action="answer", reply="Do you mean the torque scene?"
+    )
+    assert (asked.action, asked.canonical_message) == ("answer", "Do you mean the torque scene?")
+    confirmed = await _respond(
+        monkeypatch,
+        session,
+        project,
+        action="edit_video",
+        target_scenes=["S01"],
+        reply="I'll slow down the opening scene.",
+    )
+    assert confirmed.canonical_message == "I'll slow down the opening scene."
+
+
+@pytest.mark.asyncio
+async def test_several_scenes_can_change_language_together(monkeypatch, session):
+    project = await _finished_project(session)
+    decision = await _respond(
+        monkeypatch,
+        session,
+        project,
+        action="localize_video",
+        target_scenes=["S01", "S03"],
+        text_language="Tamil",
+        voice_language="Tamil",
+    )
+    assert (decision.action, decision.instruction) == ("localize_scene", "S01,S03")
 
 
 @pytest.mark.asyncio

@@ -62,7 +62,7 @@ async def classify_feedback(llm, instruction: str) -> list[FeedbackClassificatio
         f"REQUEST:\n{instruction}"
     )
     try:
-        decision = await llm.generate_structured(prompt, _FeedbackKinds, temperature=0)
+        decision = await llm.generate_structured(prompt, _FeedbackKinds)
     except Exception as error:  # noqa: BLE001 - classification must never block an edit
         logger.warning("Feedback classification unavailable: %s", error)
         return _content_edit(instruction)

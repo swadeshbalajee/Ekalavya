@@ -15,7 +15,7 @@ class Planner:
         self.decision = decision
         self.prompt = ""
 
-    async def generate_structured(self, prompt, schema, *, temperature):
+    async def generate_structured(self, prompt, schema, *, temperature=None):
         self.prompt = prompt
         return schema(**self.decision)
 

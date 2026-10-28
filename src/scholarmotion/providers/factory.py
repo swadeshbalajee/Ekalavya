@@ -47,6 +47,7 @@ def _provider_key(
 def create_llm_provider(settings: Settings):
     fallback_models = _csv_models(settings.main_llm_fallback_models)
     return _create_llm(
+        settings=settings,
         provider=settings.main_llm_provider,
         api_key=_provider_key(
             settings,
@@ -73,6 +74,7 @@ def create_planner_provider(settings: Settings):
     # Fall back to the main model so a planner outage never blocks a build.
     fallback_models = _csv_models(settings.planner_llm_fallback_models) or [settings.main_llm_model]
     return _create_llm(
+        settings=settings,
         provider=settings.main_llm_provider,
         api_key=_provider_key(
             settings,
@@ -99,6 +101,7 @@ def create_code_provider(settings: Settings):
     model = settings.code_model or settings.main_llm_model
     configured_fallbacks = _csv_models(settings.code_fallback_models)
     return _create_llm(
+        settings=settings,
         provider=provider,
         api_key=_provider_key(
             settings,
@@ -134,6 +137,7 @@ def create_translation_provider(settings: Settings):
     # build through Flash yet fail later when it localizes its narration.
     fallback_models = _csv_models(settings.main_llm_fallback_models)
     return _create_llm(
+        settings=settings,
         provider=provider,
         api_key=_provider_key(
             settings,
@@ -158,6 +162,7 @@ def create_vision_provider(settings: Settings):
     model = settings.visual_llm_model or "deterministic-v1"
     configured_fallbacks = _csv_models(settings.visual_llm_fallback_models)
     return _create_llm(
+        settings=settings,
         provider=provider,
         api_key=_provider_key(
             settings,
@@ -194,6 +199,7 @@ def create_video_provider(settings: Settings):
         return GeminiProvider(
             api_key=api_key,
             model=settings.video_llm_model,
+            default_temperature=settings.agent_temperature,
             fallback_model=configured_fallbacks[0] if configured_fallbacks else None,
         )
     base_url = settings.video_llm_base_url
@@ -206,6 +212,7 @@ def create_video_provider(settings: Settings):
     if not api_key:
         return None
     return _create_llm(
+        settings=settings,
         provider=provider,
         api_key=api_key,
         model=settings.video_llm_model,
@@ -219,6 +226,7 @@ def create_video_provider(settings: Settings):
 
 def _create_llm(
     *,
+    settings: Settings,
     provider: str,
     api_key: str | None,
     model: str,
@@ -237,9 +245,16 @@ def _create_llm(
     if not api_key:
         raise ValueError(f"API key is required for {name}")
     if name == "anthropic":
-        return AnthropicProvider(api_key=api_key, model=model)
+        return AnthropicProvider(
+            api_key=api_key, model=model, default_temperature=settings.agent_temperature
+        )
     if name == "gemini":
-        return GeminiProvider(api_key=api_key, model=model, fallback_model=fallback_model)
+        return GeminiProvider(
+            api_key=api_key,
+            model=model,
+            fallback_model=fallback_model,
+            default_temperature=settings.agent_temperature,
+        )
     if name in {"openai", "openai_compatible"}:
         return OpenAICompatibleProvider(
             api_key=api_key,
@@ -251,6 +266,7 @@ def _create_llm(
             code_max_output_tokens=code_max_output_tokens,
             reasoning_effort=reasoning_effort,
             structured_reasoning_effort=structured_reasoning_effort,
+            default_temperature=settings.agent_temperature,
         )
     raise ValueError(f"unknown LLM provider: {name}")
 

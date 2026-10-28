@@ -186,7 +186,6 @@ async def outline_paper(
                 prompt + "\nPAPER TEXT (extracted; equations may be garbled, reconstruct them "
                 "from context):\n" + text,
                 PaperOutline,
-                temperature=0,
             )
         except Exception as error:  # noqa: BLE001 - a lecture still follows the headings
             logger.warning("Paper outline failed; using section headings: %s", error)

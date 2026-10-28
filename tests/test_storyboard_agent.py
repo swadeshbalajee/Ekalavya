@@ -25,9 +25,9 @@ async def test_model_visual_planning_is_a_separate_step_and_does_not_render_narr
         name = "live"
         prompt = ""
 
-        async def generate_text(self, prompt, *, temperature, reasoning_effort):
+        async def generate_text(self, prompt, *, temperature=None, reasoning_effort=None):
             self.prompt = prompt
-            assert temperature == 0
+            assert temperature is None  # the configured agent temperature applies
             assert reasoning_effort == "high"
             return json.dumps(
                 {

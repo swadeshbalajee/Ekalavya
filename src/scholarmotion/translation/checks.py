@@ -83,6 +83,9 @@ def translation_problems(
     unexpected = set(TOKEN.findall(translated)) - {item.token for item in masked.items}
     if unexpected:
         problems.append(f"unknown placeholders {sorted(unexpected)}")
+    stray = TOKEN.sub("", translated).count("[[") - TOKEN.sub("", masked.text).count("[[")
+    if stray > 0:
+        problems.append("square brackets [[ ]] were added around text")
     added = sorted({ch for ch in TOKEN.sub("", translated) if unicodedata.category(ch) == "Nd"})
     if added:
         problems.append(

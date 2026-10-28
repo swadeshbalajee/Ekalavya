@@ -40,7 +40,7 @@ class _Planner:
     def __init__(self, **decision):
         self.decision = decision
 
-    async def generate_structured(self, _prompt, schema, *, temperature):
+    async def generate_structured(self, _prompt, schema, *, temperature=None):
         return schema(**{"canonical_message": "turn", **self.decision})
 
 

@@ -375,7 +375,7 @@ async def write_script(
             return blocks
 
         try:
-            draft = await provider.generate_structured(prompt, LessonScript, temperature=0)
+            draft = await provider.generate_structured(prompt, LessonScript)
             review = ScriptReview(approved=False)
             for revision in range(SCRIPT_REVIEW_ROUNDS):
                 if len(draft.segments) != len(slots) or any(
@@ -402,7 +402,6 @@ async def write_script(
                     + "\nSCRIPT:\n"
                     + draft.model_dump_json(),
                     ScriptReview,
-                    temperature=0,
                 )
                 if review_callback is not None:
                     await review_callback(revision + 1, review)
@@ -416,7 +415,6 @@ async def write_script(
                         + "\nFix these review problems within the word budgets:\n"
                         + "\n".join(review.problems),
                         LessonScript,
-                        temperature=0,
                     )
             if not review.blocking:
                 # Only minor notes remain: keep the reviewed draft and surface the
@@ -456,9 +454,7 @@ async def write_script(
                 )
             else:
                 try:
-                    structured = await provider.generate_structured(
-                        prompt, ScriptSegment, temperature=0
-                    )
+                    structured = await provider.generate_structured(prompt, ScriptSegment)
                     text = to_speakable(structured.narration.strip())
                     equations = [value.strip() for value in structured.equations if value.strip()]
                     key_terms = _key_terms(structured.key_terms)

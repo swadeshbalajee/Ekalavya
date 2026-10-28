@@ -92,7 +92,7 @@ class _Planner:
     def __init__(self, **decision):
         self.decision = decision
 
-    async def generate_structured(self, _prompt, schema, *, temperature):
+    async def generate_structured(self, _prompt, schema, *, temperature=None):
         return schema(**{"canonical_message": "turn", **self.decision})
 
 
@@ -263,7 +263,7 @@ async def test_the_lesson_review_sees_full_visual_plans_and_names_scenes():
     class Reviewer:
         name = "test"
 
-        async def generate_structured(self, prompt, schema, *, temperature):
+        async def generate_structured(self, prompt, schema, *, temperature=None):
             seen["prompt"] = prompt
             return schema(
                 coherent=False,

@@ -1591,19 +1591,26 @@ async def localize_project(
                 .order_by(Scene.order_index)
             )
         ).all()
+        # One scene key, several joined by commas, or None for the whole video.
+        wanted = {key.strip() for key in (scene_key or "").split(",") if key.strip()}
         scenes = (
-            [scene for scene in all_scenes if scene.scene_key == scene_key]
-            if scene_key
-            else all_scenes
+            [scene for scene in all_scenes if scene.scene_key in wanted] if wanted else all_scenes
         )
-        if scene_key and not scenes:
+        if wanted and len(scenes) != len(wanted):
             raise ValueError(f"scene {scene_key} does not exist in this project")
         if not scenes or any(
             scene.timeline_start is None or scene.timeline_end is None for scene in scenes
         ):
             raise ValueError("complete the initial lesson before localizing it")
-        start = min(scene.timeline_start for scene in scenes if scene.timeline_start is not None)
-        end = max(scene.timeline_end for scene in scenes if scene.timeline_end is not None)
+        # Consecutive scenes are rebuilt together; separate runs become separate ranges.
+        positions = [all_scenes.index(scene) for scene in scenes]
+        runs: list[list[Scene]] = []
+        for position, scene in zip(positions, scenes, strict=True):
+            if runs and all_scenes.index(runs[-1][-1]) == position - 1:
+                runs[-1].append(scene)
+            else:
+                runs.append([scene])
+        spans = [(run[0].timeline_start, run[-1].timeline_end) for run in runs]
         project.status = "LOCALIZING"
         await record_event(
             session,
@@ -1617,15 +1624,17 @@ async def localize_project(
         )
         await session.commit()
     try:
-        affected = await edit_range(
-            database,
-            settings,
-            project_id,
-            start,
-            end,
-            "Regenerate localized presentation from the canonical English lesson.",
-            localization_only=True,
-        )
+        affected = []
+        for start, end in spans:
+            affected += await edit_range(
+                database,
+                settings,
+                project_id,
+                start,
+                end,
+                "Regenerate localized presentation from the canonical English lesson.",
+                localization_only=True,
+            )
     except Exception:
         async with database.sessions() as session:
             project = await session.get(Project, project_id)
