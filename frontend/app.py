@@ -28,6 +28,7 @@ import streamlit.components.v1 as components
 from streamlit.components.v1 import declare_component
 
 from frontend.components.subtitle_track import subtitle_track_markup
+from frontend.dashboard import render_dashboard
 
 API_URL = os.getenv("SCHOLARMOTION_API_URL", "http://127.0.0.1:8000").rstrip("/")
 # Media links are opened by the browser, which may reach the API at a different
@@ -888,6 +889,16 @@ def settings_dialog(user: dict[str, Any], project: dict[str, Any] | None) -> Non
         with right:
             st.markdown("#### Account")
             st.caption("Your chats and preferences are private to this PostgreSQL account.")
+            if st.button(
+                "Usage & activity",
+                key="open-usage",
+                icon=":material/monitoring:",
+                type="primary",
+                width="stretch",
+                help="Spend, tokens, time and retries per chat, and live video runs",
+            ):
+                st.query_params["view"] = "usage"
+                st.rerun()
             st.button("Sign out", on_click=sign_out, width="stretch")
         if save_account:
             try:
@@ -1312,10 +1323,12 @@ st.markdown(
             .brand-mark { width:28px; height:28px; border-radius:8px; object-fit:cover; box-shadow:0 5px 12px #197a6526; }
     .st-key-new-chat button { margin:10px 0 14px; }
       .st-key-new-chat button p { font-size:15px !important; font-weight:600; }
-            .st-key-sidebar_footer { position:fixed; left:14px; bottom:0; z-index:5; width:248px; margin:0; padding:10px 0 10px;
+            .st-key-sidebar_footer { position:fixed; left:14px; bottom:0; z-index:60; width:248px; margin:0; padding:10px 0 10px;
         background:linear-gradient(180deg,#ffffffd9,#fff 22%); border-top:1px solid var(--line); }
             .st-key-sidebar_footer [data-testid="stHorizontalBlock"] { gap:6px !important; }
       .st-key-sidebar_footer [data-testid="column"] { display:flex; align-items:center; }
+      /* Keep the last chats scrollable above the pinned profile/settings footer. */
+      [data-testid="stSidebarUserContent"] { padding-bottom:84px !important; }
             .st-key-open-settings button, .st-key-theme-toggle button { min-width:36px !important; width:36px !important;
                 height:36px !important; min-height:36px !important; justify-content:center;
                 padding:0; border:1px solid var(--line); color:var(--muted); background:#fff; }
@@ -2225,6 +2238,9 @@ except httpx.HTTPStatusError as error:
         st.rerun()
     st.error(api_error(error))
     st.stop()
+
+if st.query_params.get("view") == "usage":
+    render_dashboard(api, user, dark=st.session_state.dark_mode)
 
 shared_chat_id = st.query_params.get("chat")
 if shared_chat_id and st.session_state.get("active_project_id") != shared_chat_id:
