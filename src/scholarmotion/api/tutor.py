@@ -35,6 +35,7 @@ from scholarmotion.retrieval.source_ingestion import LinkUnreadable, ingest_link
 from scholarmotion.retrieval.web_research import format_sources, supports_web_search
 from scholarmotion.schemas import TutorChatRequest
 from scholarmotion.translation import TranslationService
+from scholarmotion.verification.answers import answer_problems
 
 logger = logging.getLogger(__name__)
 
@@ -345,11 +346,17 @@ async def respond(
     if project.status != "COMPLETE":
         # Before a video exists, the chat's languages follow the learner's choice.
         project.text_language, project.voice_language = text_language, voice_language
-    answer = await _tutor_answer(
+    answer, checks = await _tutor_answer(
         session, settings, project, payload, conversation, canonical, prior_messages
     )
     return await _save_assistant(
-        session, translator, project, canonical=answer, action="answer", language=text_language
+        session,
+        translator,
+        project,
+        canonical=answer,
+        action="answer",
+        language=text_language,
+        checks=checks,
     )
 
 
@@ -560,9 +567,43 @@ async def _localize(session, translator, project, preparation, scenes) -> TutorD
     )
 
 
+async def _checked_reply(llm, settings, prompt: str, body: str, context: str) -> tuple[str, dict]:
+    """Verify a reply's arithmetic and citations; regenerate once if they fail.
+
+    Problems that remain after the retry are named in a short note on the
+    reply, so the learner is never shown an unverified number as checked.
+    """
+    problems = answer_problems(body, context)
+    if not problems:
+        return body, {"verified": True}
+    retry = (
+        f"{prompt}\n\nYOUR PREVIOUS ANSWER:\n{body}\n\nIt has these verified errors:\n- "
+        + "\n- ".join(problems[:6])
+        + "\nRewrite the complete answer with them corrected. Recompute every number, and "
+        "cite only pages that appear in the source excerpts."
+    )
+    try:
+        second = (await llm.generate_text(retry, temperature=settings.main_llm_temperature)).strip()
+    except Exception as error:  # noqa: BLE001 - keep the first answer with a note
+        logger.warning("Reply correction failed: %s", error)
+        second = ""
+    remaining = answer_problems(second, context) if second else problems
+    if second and len(remaining) < len(problems):
+        body = second
+    else:
+        remaining = problems
+    if remaining:
+        body += "\n\n> **Note:** I could not verify " + "; ".join(remaining[:3]) + "."
+    return body, {
+        "verified": not remaining,
+        "fixed": [problem for problem in problems if problem not in remaining],
+        "unverified": remaining,
+    }
+
+
 async def _tutor_answer(
     session, settings, project, payload, conversation, canonical, prior_messages
-) -> str:
+) -> tuple[str, dict | None]:
     retrieval_query = " ".join(
         [message.canonical_text for message in prior_messages if message.role == "user"][-3:]
         + [canonical]
@@ -572,7 +613,7 @@ async def _tutor_answer(
         return (
             f"For this lesson, focus on the relationship behind {project.request}. "
             "Tell me which moment was unclear, or which scene you want changed."
-        )
+        ), None
     llm = create_llm_provider(settings)
     effort = payload.reasoning_effort or settings.tutor_reasoning_effort
     use_web = (
@@ -599,22 +640,24 @@ async def _tutor_answer(
         f"{conversation}\n\nSOURCE EXCERPTS:\n{paper_context}\n\n"
         f"CURRENT LEARNER MESSAGE:\n{canonical}"
     )
+    sources: list[dict] = []
     try:
         if hasattr(llm, "generate_text_with_sources"):
-            answer, sources = await llm.generate_text_with_sources(
+            body, sources = await llm.generate_text_with_sources(
                 prompt,
                 temperature=settings.main_llm_temperature,
                 reasoning_effort=effort,
                 web_search=use_web,
                 max_results=settings.web_search_max_results,
             )
-            answer = answer.strip() + format_sources(sources)
         else:
-            answer = await llm.generate_text(prompt, temperature=settings.main_llm_temperature)
+            body = await llm.generate_text(prompt, temperature=settings.main_llm_temperature)
     except Exception as error:  # noqa: BLE001 - provider failures must not discard a chat turn
         logger.warning("Tutor model unavailable; using a bounded lesson fallback: %s", error)
-        answer = _fallback_tutor_answer(project, canonical, paper_context)
-    return answer.strip()
+        return _fallback_tutor_answer(project, canonical, paper_context).strip(), None
+    context = "" if paper_context == NO_SOURCES else paper_context
+    body, checks = await _checked_reply(llm, settings, prompt, body.strip(), context)
+    return (body + format_sources(sources)).strip(), checks
 
 
 async def respond_ephemeral(
@@ -642,6 +685,7 @@ async def respond_ephemeral(
             "This is a temporary chat, so do not mention projects, saved lessons, or persistence.\n\n"
             f"RECENT TEMPORARY CHAT:\n{context}\n\nLEARNER MESSAGE:\n{canonical}"
         )
+        sources: list[dict] = []
         if hasattr(llm, "generate_text_with_sources"):
             answer, sources = await llm.generate_text_with_sources(
                 prompt,
@@ -650,9 +694,10 @@ async def respond_ephemeral(
                 web_search=settings.web_search_enabled,
                 max_results=settings.web_search_max_results,
             )
-            answer = answer.strip() + format_sources(sources)
         else:
             answer = await llm.generate_text(prompt, temperature=settings.main_llm_temperature)
+        answer, _ = await _checked_reply(llm, settings, prompt, answer.strip(), "")
+        answer += format_sources(sources)
     return await translator.translate(
         answer.strip(),
         source_language="English",
@@ -670,6 +715,7 @@ async def _save_assistant(
     start: float | None = None,
     end: float | None = None,
     language: str | None = None,
+    checks: dict | None = None,
 ) -> TutorDecision:
     language = language or project.text_language
     display = await translator.translate(
@@ -683,7 +729,7 @@ async def _save_assistant(
             display_text=display,
             language=language,
             action=action,
-            metadata_json={"start": start, "end": end},
+            metadata_json={"start": start, "end": end, **({"checks": checks} if checks else {})},
         )
     )
     return TutorDecision(display, canonical, action, start, end)
