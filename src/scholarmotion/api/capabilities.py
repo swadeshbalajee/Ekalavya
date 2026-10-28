@@ -16,6 +16,7 @@ from scholarmotion.persistence.models import AdministrationAudit
 from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.providers import (
     create_code_provider,
+    create_machine_translator,
     create_stt_provider,
     create_translation_provider,
     create_tts_provider,
@@ -196,7 +197,9 @@ def create_capability_router(
 
     @router.post("/capabilities/translation/translate")
     async def translate(payload: TranslationRequest):
-        text = await TranslationService(create_translation_provider(settings)).translate(
+        text = await TranslationService(
+            create_translation_provider(settings), create_machine_translator(settings)
+        ).translate(
             payload.text,
             source_language=payload.source_language,
             target_language=payload.target_language,

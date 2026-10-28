@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -86,10 +87,12 @@ def _use_planner(monkeypatch, **decision):
 
 
 class TranslationProvider:
+    """Marks the text as translated and keeps its placeholders, like a faithful translator."""
+
     name = "test"
 
     async def generate_text(self, prompt: str, *, temperature: float | None = None) -> str:
-        return "translated"
+        return "translated " + prompt.split("TEXT:\n", 1)[1]
 
 
 def test_script_prompt_assigns_distinct_segment_purpose_and_prevents_repetition():
@@ -196,9 +199,9 @@ async def test_translation_localizes_derived_presentation_not_canonical_spec():
     )
     assert canonical.title == "English title"
     assert canonical.narration == "This canonical narration remains English."
-    assert display.title == "translated"
-    assert display.visual_beats[0].visual == "translated"
-    assert narration == "translated"
+    assert display.title == "translated English title"
+    assert display.visual_beats[0].visual.startswith("translated ")
+    assert narration == "translated This canonical narration remains English."
 
 
 @pytest.mark.asyncio
@@ -239,40 +242,31 @@ async def test_localization_locks_equation_symbols_in_visible_text_and_narration
 
 
 @pytest.mark.asyncio
-async def test_structured_localization_translates_scene_in_one_request_and_locks_equations():
+async def test_screen_text_is_translated_in_one_batch_and_equations_stay_locked():
     class BatchProvider:
         name = "test"
 
         def __init__(self):
-            self.calls = 0
-            self.prompt = ""
+            self.batches = 0
+            self.texts = 0
 
         async def generate_structured(self, prompt, schema, *, temperature=None):
-            self.calls += 1
-            self.prompt = prompt
-            token = "SCHOLARMOTION_STEM_LOCK_0_END"
-            return schema.model_validate(
-                {
-                    "title": "காஸ் விதி",
-                    "learning_objective": "மின்பாயத்தை விளக்கவும்",
-                    "visual_beats": [
-                        {
-                            "narration_segment": f"இந்த விதி {token}",
-                            "visual": f"இந்த சமன்பாட்டைக் காட்டு: {token}",
-                        }
-                    ],
-                    "narration": f"மின்பாயம் இந்த சமன்பாட்டால் வரையறுக்கப்படுகிறது: {token}",
-                }
-            )
+            self.batches += 1
+            strings = json.loads(prompt.rsplit("\n", 1)[1])
+            return schema(translations=[f"தமிழ் {value}" for value in strings])
+
+        async def generate_text(self, prompt, *, temperature=None):
+            self.texts += 1
+            return "தமிழ் " + prompt.split("TEXT:\n", 1)[1]
 
     provider = BatchProvider()
     display, narration = await TranslationService(provider).localize_scene(
         _maxwell_scene(), text_language="Tamil", voice_language="Tamil"
     )
 
-    assert provider.calls == 1
-    assert "established Tamil technical terms" in provider.prompt
-    assert display.title == "காஸ் விதி"
+    # All screen strings in one structured call; the narration on its own.
+    assert (provider.batches, provider.texts) == (1, 1)
+    assert display.title.startswith("தமிழ் ")
     assert "∇ · E = ρ / ε₀" in display.visual_beats[0].visual
     assert "∇ · E = ρ / ε₀" in narration
 

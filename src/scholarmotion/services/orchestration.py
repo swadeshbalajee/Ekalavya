@@ -1548,9 +1548,7 @@ class ScholarMotionPipeline:
             layers={"render": True},
         )
         self._json(f"{base}/verification/v{render_version}.json", report)
-        return ProducedScene(
-            spec, "", audio, str(path), report, render_version, 0, 1, duration
-        )
+        return ProducedScene(spec, "", audio, str(path), report, render_version, 0, 1, duration)
 
     async def _render_safe_scene(
         self,
@@ -1773,9 +1771,16 @@ class ScholarMotionPipeline:
         )
         cache = self.__dict__.setdefault("_presentation_cache", {})
         if key not in cache:
+            events = getattr(self.translator, "events", None)
+            seen = len(events) if isinstance(events, list) else 0
             cache[key] = await self.translator.localize_scene(
                 spec, text_language=self.text_language, voice_language=self.voice_language
             )
+            if isinstance(events, list) and len(events) > seen:
+                # Translation checks that needed a retry or fell back to English.
+                await self._notify_progress(
+                    "translation.checked", spec.scene_id, {"findings": events[seen:]}
+                )
         return cache[key]
 
     async def _synthesize_lesson_narration(self, project_id: str, specs: list[SceneSpec]) -> None:

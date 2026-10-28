@@ -806,6 +806,8 @@ async def generate_scene_code(
         "If the storyboard lists more visual steps than cues, merge them into the cue whose "
         "sentence describes them. Any clock.play after the last cue is skipped, because the "
         "narration has already ended.\n"
+        "On-screen STEM terms may be written 'English term (native term)'; copy such labels "
+        "exactly, including both parts.\n"
         "NARRATION/VISUAL CONTRACT: the screen must show what the voice says at that moment, with "
         "the same example, symbols and numbers, in the same order. When the voice names a "
         "quantity, value or step, the matching object is visible or highlighted during that "

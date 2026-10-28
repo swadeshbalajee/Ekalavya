@@ -29,6 +29,7 @@ def compile_scene_specs(
                 narration=block.text,
                 visual_beats=timed,
                 equations=block.equations,
+                key_terms=block.key_terms,
                 data_plots=block.data_plots,
                 paper_figures=block.paper_figures,
                 source_ids=block.source_ids,

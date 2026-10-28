@@ -25,7 +25,11 @@ from scholarmotion.persistence.models import (
     WorkspaceProfile,
 )
 from scholarmotion.persistence.storage import LocalObjectStore
-from scholarmotion.providers import create_llm_provider, create_translation_provider
+from scholarmotion.providers import (
+    create_llm_provider,
+    create_machine_translator,
+    create_translation_provider,
+)
 from scholarmotion.retrieval.project_papers import project_papers, project_sources
 from scholarmotion.retrieval.source_ingestion import LinkUnreadable, ingest_link
 from scholarmotion.retrieval.web_research import format_sources, supports_web_search
@@ -179,7 +183,9 @@ async def respond(
     decision against the conversation's real state (video ready, scenes,
     duration) and starts the matching action.
     """
-    translator = TranslationService(create_translation_provider(settings))
+    translator = TranslationService(
+        create_translation_provider(settings), create_machine_translator(settings)
+    )
     prior_messages = list(
         (
             await session.scalars(
@@ -615,7 +621,9 @@ async def respond_ephemeral(
     settings: Settings, payload: TutorChatRequest, history: list[str] | None = None
 ) -> str:
     """Answer a temporary chat without creating a project or message rows."""
-    translator = TranslationService(create_translation_provider(settings))
+    translator = TranslationService(
+        create_translation_provider(settings), create_machine_translator(settings)
+    )
     input_language = payload.language or "English"
     canonical = await translator.to_english(payload.message, source_language=input_language)
     context = "\n".join(history or [])

@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 class ScriptSegment(BaseModel):
     narration: str = ""
     equations: list[str] = Field(default_factory=list)
+    # The STEM terms this segment names, in English (e.g. "photoelectric effect").
+    key_terms: list[str] = Field(default_factory=list)
     title: str = ""
     learning_objective: str = ""
     # Paper lectures: ids of the chapter's data plots this segment narrates.
@@ -123,7 +125,18 @@ that this segment teaches in that list. Keep their symbols, signs, indices, and 
 The narration must explain each listed equation and what its symbols mean in natural spoken words.
 Write each equation as valid MathTex-ready LaTeX, with proper fractions and grouped indices.
 Return the `narration` and `equations` fields; equations are visual notation and must not be spoken
-as raw markup."""
+as raw markup. In `key_terms`, list up to six technical STEM terms this segment names, exactly as
+written in the narration (e.g. "photoelectric effect", "work function"); not people or places."""
+
+
+def _key_terms(values: list[str], limit: int = 6) -> list[str]:
+    """Distinct, non-empty key terms in the order the model gave them."""
+    seen: dict[str, str] = {}
+    for value in values:
+        term = " ".join(value.split())
+        if term and term.casefold() not in seen and len(term) <= 60:
+            seen[term.casefold()] = term
+    return list(seen.values())[:limit]
 
 
 def _fallback_narration(
@@ -345,6 +358,7 @@ async def write_script(
                     estimated_duration_seconds=seconds,
                     defined_symbols={},
                     equations=segment.equations,
+                    key_terms=_key_terms(segment.key_terms),
                     data_plots=[plot for plot in item.plots if plot.plot_id in segment.plot_ids],
                     paper_figures=[
                         figure
@@ -432,6 +446,7 @@ async def write_script(
             # Models reach for LaTeX even when told not to, and this same string
             # is both spoken and subtitled, so normalise it rather than trust it.
             equations: list[str] = []
+            key_terms: list[str] = []
             if getattr(provider, "name", "") == "mock":
                 text = _fallback_narration(
                     item,
@@ -446,6 +461,7 @@ async def write_script(
                     )
                     text = to_speakable(structured.narration.strip())
                     equations = [value.strip() for value in structured.equations if value.strip()]
+                    key_terms = _key_terms(structured.key_terms)
                 except (AttributeError, NotImplementedError):
                     text = to_speakable((await provider.generate_text(prompt)).strip())
                 except Exception as error:  # noqa: BLE001 - malformed structured output is recoverable
@@ -473,6 +489,7 @@ async def write_script(
                     estimated_duration_seconds=duration,
                     defined_symbols={},
                     equations=equations,
+                    key_terms=key_terms,
                 )
             )
     _attach_unclaimed_plots(blocks, curriculum)

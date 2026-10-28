@@ -70,6 +70,7 @@ from scholarmotion.providers import (
     create_code_provider,
     create_embedding_provider,
     create_llm_provider,
+    create_machine_translator,
     create_planner_provider,
     create_translation_provider,
     create_tts_provider,
@@ -264,7 +265,9 @@ def create_pipeline(
         assembler=FFmpegAssembler(settings.ffmpeg_binary, mock_missing=False),
         correction_memory=CorrectionMemory(session),
         skill_service=SkillService(session),
-        translator=TranslationService(create_translation_provider(settings)),
+        translator=TranslationService(
+            create_translation_provider(settings), create_machine_translator(settings)
+        ),
         text_language=text_language,
         voice_language=voice_language,
         max_concurrent_scenes=settings.max_concurrent_scenes,
@@ -1130,7 +1133,7 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
             if project.text_language.casefold() != "english":
                 try:
                     display_summary = await TranslationService(
-                        create_translation_provider(settings)
+                        create_translation_provider(settings), create_machine_translator(settings)
                     ).translate(
                         verification_summary,
                         source_language="English",

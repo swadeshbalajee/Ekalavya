@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from scholarmotion.config import Settings
+from scholarmotion.providers.bodhan import (
+    BodhanTranslator,
+    BodhanTTSProvider,
+    LanguageRoutedTTS,
+    parse_voice_map,
+)
 from scholarmotion.providers.embeddings.gemini import GeminiEmbeddingProvider
 from scholarmotion.providers.embeddings.local import LocalEmbeddingProvider
 from scholarmotion.providers.embeddings.openai_compatible import OpenAICompatibleEmbeddingProvider
@@ -249,7 +255,34 @@ def _create_llm(
     raise ValueError(f"unknown LLM provider: {name}")
 
 
+def create_machine_translator(settings: Settings) -> BodhanTranslator | None:
+    """Bodhan translation when a key is configured, else None (LLM translation only)."""
+    api_key = settings.bodhan_translate_api_key or settings.bodhan_api_key
+    if not api_key:
+        return None
+    return BodhanTranslator(
+        api_key=api_key, base_url=settings.bodhan_base_url, usd_per_inr=settings.usd_per_inr
+    )
+
+
 def create_tts_provider(settings: Settings):
+    """The narration provider, routed to Bodhan for its languages when a key is set."""
+    provider = _create_base_tts_provider(settings)
+    api_key = settings.bodhan_tts_api_key or settings.bodhan_api_key
+    if not api_key:
+        return provider
+    bodhan = BodhanTTSProvider(
+        api_key=api_key,
+        voice=settings.bodhan_tts_voice,
+        voices=parse_voice_map(settings.bodhan_tts_voices),
+        style=settings.bodhan_tts_style,
+        base_url=settings.bodhan_base_url,
+        usd_per_inr=settings.usd_per_inr,
+    )
+    return LanguageRoutedTTS(bodhan, provider)
+
+
+def _create_base_tts_provider(settings: Settings):
     if settings.tts_provider.lower() == "mock":
         return MockTTSProvider(settings.tts_model)
     if settings.tts_provider.lower() == "gemini":

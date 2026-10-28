@@ -25,6 +25,8 @@ class UsageEntry:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     cost_usd: float | None = None
+    # Characters spoken or translated, for services billed per character.
+    characters: int = 0
 
 
 @dataclass
@@ -173,5 +175,31 @@ def record_usage(response: Any, *, purpose: str, model: str) -> None:
             cache_write_tokens=_int(_field(prompt_details, "cache_write_tokens")),
             reasoning_tokens=_int(_field(output_details, "reasoning_tokens")),
             cost_usd=cost,
+        )
+    )
+
+
+def record_service_usage(
+    *,
+    purpose: str,
+    model: str,
+    cost_usd: float | None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    characters: int = 0,
+) -> None:
+    """Record a non-LLM service call (machine translation, TTS), if tracked."""
+    ledger = _LEDGER.get()
+    if ledger is None:
+        return
+    stage = _STAGE.get()
+    ledger.add(
+        UsageEntry(
+            purpose=f"{stage}:{purpose}" if stage else purpose,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            characters=characters,
+            cost_usd=cost_usd,
         )
     )

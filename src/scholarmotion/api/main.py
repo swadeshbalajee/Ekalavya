@@ -74,6 +74,7 @@ from scholarmotion.persistence.qdrant import QdrantConfig, QdrantUnavailable, Qd
 from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.providers import (
     create_llm_provider,
+    create_machine_translator,
     create_translation_provider,
 )
 from scholarmotion.retrieval.source_ingestion import (
@@ -536,7 +537,9 @@ async def create_project(payload: ProjectCreate, session: SessionDep):
     voice_language = payload.voice_language or payload.language or default_voice_language
     # A length the learner states in the chat is the planner's decision at that turn.
     duration_minutes = payload.target_duration_minutes or default_duration_minutes
-    canonical_request = await TranslationService(create_translation_provider(settings)).to_english(
+    canonical_request = await TranslationService(
+        create_translation_provider(settings), create_machine_translator(settings)
+    ).to_english(
         # The translation model detects the language the learner typed in; the UI's
         # selected output language says nothing about the input.
         payload.request,
@@ -1247,7 +1250,7 @@ async def edit_tutor_message(
     if message_index == 0 and not project.active_video_path:
         project.original_request = edited_text
         project.request = await TranslationService(
-            create_translation_provider(settings)
+            create_translation_provider(settings), create_machine_translator(settings)
         ).to_english(edited_text, source_language=original_language)
 
     response = await _respond_to_chat(

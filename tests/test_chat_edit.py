@@ -138,7 +138,7 @@ async def test_tutor_prompt_includes_recent_persisted_turns(monkeypatch):
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     class Translator:
-        def __init__(self, _provider):
+        def __init__(self, _provider, _machine=None):
             pass
 
         async def to_english(self, text, source_language=None):

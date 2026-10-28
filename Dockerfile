@@ -26,7 +26,8 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install ".[llm,embeddings,alignment,manim]"
+RUN pip install ".[llm,embeddings,alignment,manim]" \
+    && python -m spacy download en_core_web_sm
 
 COPY alembic.ini ./
 COPY alembic ./alembic

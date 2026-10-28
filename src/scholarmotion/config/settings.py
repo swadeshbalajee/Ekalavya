@@ -109,6 +109,19 @@ class Settings(BaseSettings):
     )
     tts_response_format: str = "mp3"
     tts_pcm_sample_rate: int = Field(default=24000, ge=8000, le=96000)
+    # Bodhan AI (https://console.bodhan.ai). When a key is set, translation and
+    # narration for the languages Bodhan covers go there; everything else, and
+    # any failed Bodhan call, uses the providers configured above.
+    bodhan_api_key: str | None = None
+    bodhan_translate_api_key: str | None = None
+    bodhan_tts_api_key: str | None = None
+    bodhan_base_url: str = "https://api.bodhan.ai"
+    bodhan_tts_voice: str = "Kavya"
+    # Per-language voices, e.g. "ta:Name,te:Name"; unlisted languages use bodhan_tts_voice.
+    bodhan_tts_voices: str = ""
+    bodhan_tts_style: str = "educational lecture"
+    # Dollars per rupee, for showing Bodhan's INR prices in dollars.
+    usd_per_inr: float = Field(default=0.012, gt=0)
     stt_provider: str = "mock"
     stt_api_key: str | None = None
     stt_model: str = "deterministic-v1"

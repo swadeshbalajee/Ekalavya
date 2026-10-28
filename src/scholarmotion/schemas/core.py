@@ -160,6 +160,8 @@ class NarrationBlock(BaseModel):
     equations: list[str] = Field(default_factory=list)
     data_plots: list[DataPlot] = Field(default_factory=list)
     paper_figures: list[PaperFigure] = Field(default_factory=list)
+    # English STEM terms this block names; kept in English when localized.
+    key_terms: list[str] = Field(default_factory=list)
 
 
 class VisualBeat(BaseModel):
@@ -187,6 +189,7 @@ class SceneSpec(BaseModel):
     narration: str
     visual_beats: list[VisualBeat]
     equations: list[str] = Field(default_factory=list)
+    key_terms: list[str] = Field(default_factory=list)
     data_plots: list[DataPlot] = Field(default_factory=list)
     paper_figures: list[PaperFigure] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
