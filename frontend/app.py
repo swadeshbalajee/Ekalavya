@@ -30,6 +30,9 @@ from streamlit.components.v1 import declare_component
 from frontend.components.subtitle_track import subtitle_track_markup
 
 API_URL = os.getenv("SCHOLARMOTION_API_URL", "http://127.0.0.1:8000").rstrip("/")
+# Media links are opened by the browser, which may reach the API at a different
+# address than this server does (e.g. inside Docker Compose).
+PUBLIC_API_URL = os.getenv("SCHOLARMOTION_PUBLIC_API_URL", API_URL).rstrip("/")
 API_KEY = os.getenv("SCHOLARMOTION_API_KEY")
 LANGUAGES = [
     "English",
@@ -705,7 +708,7 @@ def media_url(project_id: str, resource: str) -> str:
     params = [f"access_token={quote(st.session_state.auth_token, safe='')}"]
     if API_KEY:
         params.append(f"api_key={quote(API_KEY, safe='')}")
-    return f"{API_URL}/v1/projects/{project_id}/{resource}?{'&'.join(params)}"
+    return f"{PUBLIC_API_URL}/v1/projects/{project_id}/{resource}?{'&'.join(params)}"
 
 
 def chapter_player(

@@ -1,0 +1,106 @@
+# Runs the whole stack on any OS with Docker:  docker compose up --build
+# Provider keys come from .env (copy .env.example). Service addresses below
+# override the 127.0.0.1 defaults in .env so containers reach each other.
+name: ekalavya
+
+# All app services share one image, built once by `migrate`.
+x-app: &app
+  image: ekalavya:latest
+  pull_policy: never
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://scholarmotion:scholarmotion@postgres:5432/scholarmotion
+    QDRANT_URL: http://qdrant:6333
+    TEMPORAL_ADDRESS: temporal:7233
+    OBJECT_STORAGE_ROOT: /app/projects
+  volumes:
+    - ./projects:/app/projects
+    - model-cache:/cache/huggingface
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: scholarmotion
+      POSTGRES_PASSWORD: scholarmotion
+      POSTGRES_DB: scholarmotion
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scholarmotion"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.20.0
+    volumes:
+      - qdrant-data:/qdrant/storage
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/temporal:1.9.1
+    # The image runs as user `temporal`; its home directory is writable by it.
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/home/temporal/temporal.db"]
+    volumes:
+      - temporal-data:/home/temporal
+    ports:
+      - "127.0.0.1:8233:8233"   # Temporal web UI
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["uvicorn", "scholarmotion.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+      temporal:
+        condition: service_started
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "scholarmotion.workflows.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      temporal:
+        condition: service_started
+
+  frontend:
+    <<: *app
+    command:
+      - streamlit
+      - run
+      - frontend/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    environment:
+      SCHOLARMOTION_API_URL: http://api:8000             # server-side calls
+      SCHOLARMOTION_PUBLIC_API_URL: http://127.0.0.1:8000  # video links opened by the browser
+      SCHOLARMOTION_API_KEY: ${APP_API_KEY:-}
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  qdrant-data:
+  temporal-data:
+  model-cache:

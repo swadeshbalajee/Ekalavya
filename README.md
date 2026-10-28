@@ -95,32 +95,63 @@ More detail is in [docs/system-design.md](docs/system-design.md).
 
 ---
 
-## Quick start (Windows)
+## Running Ekalavya
 
-Development and testing were done on Windows 10/11 x64. The two scripts below set up and run everything locally under `.local/`. Docker is not needed.
+Ekalavya runs with Docker on Windows, macOS and Linux, using the same command on each.
 
 **Prerequisites**
-- [Miniconda or Miniforge](https://docs.conda.io/projects/miniconda/en/latest/), with `conda` on your PATH.
-- An [OpenRouter](https://openrouter.ai/) API key, or any OpenAI-compatible provider. See [Configuration](#configuration).
-- About 6 GB of disk space for the Conda env, the local embedding model and the aligner model.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows/macOS) or Docker Engine with the Compose plugin (Linux).
+- An [OpenRouter](https://openrouter.ai/) API key, or another provider; see [Configuration](#configuration).
+- About 8 GB of free disk space for the image and the models it downloads on first use.
 
-**1. One-time setup.** This creates the Conda env, writes `.env` with a random client key, downloads Qdrant and Temporal, and initializes PostgreSQL:
+**1. Get the code and create `.env`:**
 
-```powershell
+```bash
 git clone <this-repo> Ekalavya
 cd Ekalavya
-powershell -ExecutionPolicy Bypass -File scripts\setup-local.ps1
+cp .env.example .env          # Windows PowerShell: Copy-Item .env.example .env
 ```
 
-**2. Add your model key.** Open `.env` and fill in the provider settings, as in the example under [Configuration](#configuration).
+**2. Edit `.env`:**
+- set `APP_API_KEY` to any random string;
+- add your provider settings (see [Configuration](#configuration)).
 
-**3. Start everything:**
+**3. Build and start everything:**
+
+```bash
+docker compose up --build
+```
+
+The first build takes about 10–15 minutes. It installs Manim, LaTeX, FFmpeg, CPU PyTorch and Noto fonts for Indic scripts. Later starts take seconds. Compose runs:
+- PostgreSQL, Qdrant and Temporal;
+- a one-shot database migration;
+- the API, the worker and the UI.
+
+**Stopping and data:**
+- `Ctrl+C` or `docker compose down` stops the stack.
+- Chats and accounts stay in Docker volumes, and videos in `./projects`. Both survive restarts.
+- `docker compose down -v` also deletes your chats.
+- `docker compose logs -f worker` follows the lesson pipeline.
+- For a smaller image without LaTeX, run `docker compose build --build-arg WITH_LATEX=0`. Equations then render as Unicode text.
+
+<details>
+<summary>Developing without Docker (Windows)</summary>
+
+The project was developed natively on Windows. `scripts/setup-local.ps1` does the one-time setup:
+- creates a Conda env;
+- writes `.env`;
+- downloads Qdrant and Temporal into `.local/`;
+- initializes PostgreSQL.
+
+`scripts/start-local.ps1` and `scripts/stop-local.ps1` start and stop all services. Logs go to `.local/logs/`.
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-local.ps1
 powershell -ExecutionPolicy Bypass -File scripts\start-local.ps1
 ```
+</details>
 
-This starts PostgreSQL, Qdrant, Temporal, the API, the worker and the UI, and runs database migrations. Services that are already running are skipped. When it finishes, open:
+### Open the app
 
 | | URL |
 |---|---|
@@ -128,41 +159,11 @@ This starts PostgreSQL, Qdrant, Temporal, the API, the worker and the UI, and ru
 | API docs (OpenAPI) | http://127.0.0.1:8000/docs |
 | Temporal UI | http://127.0.0.1:8233 |
 
-**4. Use it.** Click **Create account**, sign in, and try:
+Click **Create account**, sign in, and try:
 - `What is the derivative of sin x?` gets a chat answer.
 - `Explain the Pythagorean theorem visually in Hindi` starts a video lesson.
 - `Make a video from this blog: https://…` makes Ekalavya ask whether to use only that source.
 - After a video finishes: `0:20 to 0:40, slow down and add a worked example`.
-
-**Stop everything:**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\stop-local.ps1
-```
-
-Logs are written to `.local/logs/`. Your chats, accounts and videos persist across restarts: they live in `.local/postgres` and `projects/`.
-
-**Optional: typeset equations.** Install [TinyTeX](https://yihui.org/tinytex/) into `.local\bin\TinyTeX`. Without it, Ekalavya detects the missing LaTeX and renders equations as Unicode text.
-
-### Linux / macOS
-
-There are no scripts for Linux or macOS yet; run the same services manually.
-
-```bash
-conda env create -f environment.yml && conda activate scholarmotion
-cp .env.example .env                       # then add provider keys
-initdb -D .local/postgres -U scholarmotion -A trust
-pg_ctl -D .local/postgres -l .local/postgres.log start
-createdb -U scholarmotion scholarmotion
-./qdrant &                                 # native Qdrant binary, port 6333
-temporal server start-dev &                # port 7233
-alembic upgrade head
-python -m scholarmotion.workflows.worker &
-uvicorn scholarmotion.api.main:app --port 8000 &
-SCHOLARMOTION_API_KEY=<APP_API_KEY from .env> PYTHONPATH=. streamlit run frontend/app.py
-```
-
-For an alternative Windows setup using Docker for Qdrant and a system PostgreSQL service, see [docs/windows.md](docs/windows.md).
 
 ---
 
@@ -173,7 +174,7 @@ All settings live in `.env`. [.env.example](.env.example) documents every variab
 The reference setup uses a single OpenRouter key:
 
 ```dotenv
-APP_API_KEY=<random; created by setup-local.ps1>
+APP_API_KEY=<any random string>
 OPENROUTER_API_KEY=<your key>
 
 MAIN_LLM_PROVIDER=openai_compatible
@@ -247,11 +248,12 @@ Ekalavya/
 │   ├── config/                 typed settings from .env
 │   └── schemas/                shared Pydantic models
 ├── alembic/                  database migrations
+├── Dockerfile, docker-compose.yml   containerized stack (any OS)
 ├── tests/                    pytest suite (unit + mocked end-to-end)
 ├── scripts/
-│   ├── setup-local.ps1         one-time Windows setup
-│   ├── start-local.ps1         start all services
-│   ├── stop-local.ps1          stop all services
+│   ├── setup-local.ps1         native Windows dev setup (optional; Docker is the default)
+│   ├── start-local.ps1         start native services
+│   ├── stop-local.ps1          stop native services
 │   ├── ingest_ncert.py         bulk-index NCERT textbook PDFs
 │   ├── kokoro_server.py        optional local Kokoro TTS server
 │   └── qa/                     live QA harnesses (browser, scenarios, multilingual, edits)
@@ -298,7 +300,7 @@ The full API is documented at `/docs`. Every route except `/health`, `/docs` and
 
 ## Known limitations
 
-- **Platform:** Windows has scripts; Linux and macOS are documented but not scripted.
+- **Performance:** rendering and speech alignment run on the CPU, so a lesson takes several minutes on a laptop.
 - **Sandboxing:** the render sandbox uses resource limits. Full network isolation (`SANDBOX_ISOLATION=required`, bubblewrap) is available only on Linux.
 - **Lesson length:** set by the planner, up to 30 minutes. Very long lessons cost more and take longer to build.
 - **Web sources:** web-page extraction is readability-style. Pages that need JavaScript to render must be attached as a PDF instead.
