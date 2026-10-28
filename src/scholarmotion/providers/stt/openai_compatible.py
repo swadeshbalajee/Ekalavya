@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import httpx
 
+from scholarmotion.observability.usage import record_service_usage
 from scholarmotion.schemas import STTResult
 
 _LANGUAGE_CODES = {
@@ -43,6 +45,7 @@ class OpenAICompatibleSTTProvider:
         data = {"model": self.model}
         if code := _language_code(language):
             data["language"] = code
+        started = time.perf_counter()
         async with httpx.AsyncClient(timeout=120) as client:
             with audio_path.open("rb") as audio:
                 response = await client.post(
@@ -53,4 +56,13 @@ class OpenAICompatibleSTTProvider:
                 )
         response.raise_for_status()
         payload = response.json()
+        record_service_usage(
+            purpose="stt",
+            model=self.model,
+            cost_usd=None,
+            input_tokens=0,
+            characters=len(payload.get("text", "")),
+            provider="openrouter" if "openrouter.ai" in self.base_url else self.name,
+            latency_ms=(time.perf_counter() - started) * 1000,
+        )
         return STTResult(text=payload.get("text", ""), language=language)

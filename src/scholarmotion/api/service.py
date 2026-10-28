@@ -91,6 +91,7 @@ from scholarmotion.retrieval.qdrant_retrieval import QdrantHybridRetriever
 from scholarmotion.retrieval.web_research import web_research
 from scholarmotion.schemas import ArtifactKind, PaperFigure, SceneSpec, TimingCue, TTSResult
 from scholarmotion.services import BuildResult, ScholarMotionPipeline
+from scholarmotion.services.usage_records import new_run_id, usage_rows
 from scholarmotion.skills import SkillService
 from scholarmotion.translation import TranslationService
 
@@ -379,7 +380,7 @@ async def next_build_versions(session, project_id: UUID) -> tuple[int, int]:
 _PRICE_CACHE: dict[str, dict[str, float]] = {}
 
 
-async def _openrouter_prices(settings: Settings) -> dict[str, dict[str, float]]:
+async def openrouter_prices(settings: Settings) -> dict[str, dict[str, float]]:
     """Per-token prices from OpenRouter's public model list (cached per process)."""
     if _PRICE_CACHE:
         return _PRICE_CACHE
@@ -413,8 +414,9 @@ async def _record_usage_summary(
         return
     try:
         if any(entry.cost_usd is None for entry in ledger.entries):
-            ledger.estimate_missing_costs(await _openrouter_prices(settings))
-        summary = {"operation": operation, **ledger.summary()}
+            ledger.estimate_missing_costs(await openrouter_prices(settings))
+        run_id = new_run_id()
+        summary = {"operation": operation, "run_id": run_id, **ledger.summary()}
         storage = LocalObjectStore(settings.object_storage_root)
         version = 1
         while storage.exists(f"{project_id}/artifacts/usage/{operation}-v{version}.json"):
@@ -426,6 +428,18 @@ async def _record_usage_summary(
         )
         async with database.sessions() as session:
             await record_event(session, project_id, "usage.summary", detail=summary)
+            owner_id = await session.scalar(
+                select(Project.owner_id).where(Project.id == project_id)
+            )
+            session.add_all(
+                usage_rows(
+                    ledger,
+                    user_id=owner_id,
+                    project_id=project_id,
+                    operation=operation,
+                    run_id=run_id,
+                )
+            )
             await session.commit()
         logger.info(
             "%s for %s cost $%.4f over %d model calls",

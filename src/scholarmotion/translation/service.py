@@ -18,6 +18,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from scholarmotion.observability.usage import usage_stage
 from scholarmotion.schemas import SceneSpec
 from scholarmotion.translation.checks import translation_problems, unspeakable
 from scholarmotion.translation.entities import (
@@ -111,7 +112,8 @@ class TranslationService:
         if self._offline:
             return text
         masked = mask(text)
-        [result] = await self._translate_all([masked], target_language)
+        with usage_stage("translation"):
+            [result] = await self._translate_all([masked], target_language)
         if result is None:
             if _is_english(target_language):
                 raise RuntimeError("translation to English failed its checks")
@@ -128,6 +130,12 @@ class TranslationService:
         """Return localized visible text and narration from canonical English."""
         if self._offline or (_is_english(text_language) and _is_english(voice_language)):
             return spec, spec.narration
+        with usage_stage("translation"):
+            return await self._localize_scene(spec, text_language, voice_language)
+
+    async def _localize_scene(
+        self, spec: SceneSpec, text_language: str, voice_language: str
+    ) -> tuple[SceneSpec, str]:
         terms = tuple(spec.key_terms)
         equations = tuple(spec.equations)
 

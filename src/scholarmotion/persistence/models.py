@@ -544,6 +544,39 @@ class ModelInvocation(Base, IdMixin):
     cost_usd: Mapped[float | None] = mapped_column(Float)
 
 
+class UsageEvent(Base, IdMixin):
+    """One billed model or service call (or an aggregate of calls), for usage dashboards.
+
+    ``run_id`` groups the calls of one build, edit, localization or chat turn.
+    Rows imported from older per-build summaries carry ``calls`` > 1 and no
+    timing.
+    """
+
+    __tablename__ = "usage_events"
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    operation: Mapped[str] = mapped_column(String(40), index=True)
+    stage: Mapped[str | None] = mapped_column(String(60))
+    purpose: Mapped[str] = mapped_column(String(120))
+    scene_key: Mapped[str | None] = mapped_column(String(40))
+    provider: Mapped[str | None] = mapped_column(String(60))
+    model: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), default="ok")
+    calls: Mapped[int] = mapped_column(Integer, default=1)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    characters: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float | None] = mapped_column(Float)
+    latency_ms: Mapped[float | None] = mapped_column(Float)
+
+
 class ProgressEvent(Base, IdMixin):
     __tablename__ = "progress_events"
     project_id: Mapped[UUID] = mapped_column(

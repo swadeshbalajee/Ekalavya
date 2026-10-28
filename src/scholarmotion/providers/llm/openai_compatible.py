@@ -8,12 +8,13 @@ import base64
 import json
 import logging
 import re
+import time
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
 from scholarmotion.observability import record_provider_event
-from scholarmotion.observability.usage import record_usage
+from scholarmotion.observability.usage import record_failure, record_usage
 
 from .base import LLMCapabilities
 
@@ -55,6 +56,11 @@ class OpenAICompatibleProvider:
         ]
         self.capabilities = LLMCapabilities(images=supports_images)
 
+    @property
+    def _provider_label(self) -> str:
+        """Provider name shown in usage records."""
+        return "openrouter" if getattr(self, "openrouter", False) else self.name
+
     async def _with_fallback(
         self,
         request,
@@ -66,6 +72,7 @@ class OpenAICompatibleProvider:
     ):
         last_error: Exception | None = None
         for model in [self.model, *self.fallback_models]:
+            started = time.perf_counter()
             try:
                 async with asyncio.timeout(timeout_seconds):
                     response = await request(model)
@@ -84,7 +91,14 @@ class OpenAICompatibleProvider:
                         f"{model} returned invalid model response: {choices[0].finish_reason}"
                     )
                 # Count every billed attempt, including ones rejected below.
-                record_usage(response, purpose=purpose, model=model)
+                record_usage(
+                    response,
+                    purpose=purpose,
+                    model=model,
+                    provider=self._provider_label,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                    status="ok" if model == self.model else "fallback",
+                )
                 if validator is not None and not validator(response):
                     raise RuntimeError(f"{model} returned {invalid_output_message}")
                 record_provider_event(provider=self.name, outcome="success")
@@ -118,6 +132,12 @@ class OpenAICompatibleProvider:
                     record_provider_event(provider=self.name, outcome="error")
                     raise
                 last_error = error
+                record_failure(
+                    purpose=purpose,
+                    model=model,
+                    provider=self._provider_label,
+                    latency_ms=(time.perf_counter() - started) * 1000,
+                )
                 record_provider_event(provider=self.name, outcome="fallback")
         if last_error:
             raise last_error

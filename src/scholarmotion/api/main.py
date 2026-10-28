@@ -27,6 +27,7 @@ from scholarmotion.api.admin import require_admin
 from scholarmotion.api.capabilities import create_capability_router
 from scholarmotion.api.service import (
     activate_video_version,
+    openrouter_prices,
     reassemble_active,
     reset_failed_generation,
 )
@@ -38,6 +39,7 @@ from scholarmotion.api.tutor import (
     video_scenes,
 )
 from scholarmotion.api.tutor import respond as tutor_respond
+from scholarmotion.api.usage import create_usage_router
 from scholarmotion.config import get_settings
 from scholarmotion.observability import (
     configure_logging,
@@ -46,6 +48,7 @@ from scholarmotion.observability import (
     observe_http,
     prometheus_payload,
 )
+from scholarmotion.observability.usage import track_usage
 from scholarmotion.persistence.database import Database
 from scholarmotion.persistence.models import (
     AdministrationAudit,
@@ -102,6 +105,7 @@ from scholarmotion.schemas import (
     UserRegisterRequest,
 )
 from scholarmotion.services.index_reconciliation import reconcile_qdrant_index
+from scholarmotion.services.usage_records import new_run_id, usage_rows
 from scholarmotion.skills.bootstrap import bootstrap_system_knowledge
 from scholarmotion.translation import TranslationService
 from scholarmotion.workflows import (
@@ -188,6 +192,8 @@ def _user_payload(user: UserAccount) -> dict:
         "default_duration_minutes": user.default_duration_minutes,
         "default_text_language": user.default_text_language,
         "default_voice_language": user.default_voice_language,
+        "is_admin": user.username.casefold()
+        in {name.strip().casefold() for name in settings.admin_usernames.split(",")},
     }
 
 
@@ -270,7 +276,7 @@ async def request_observability(request, call_next):
     if (
         request.url.path == "/projects"
         or request.url.path.startswith(("/projects/", "/v1/projects"))
-        or request.url.path.startswith(("/v1/project-folders", "/v1/temporary-chat"))
+        or request.url.path.startswith(("/v1/project-folders", "/v1/temporary-chat", "/v1/usage"))
     ):
         raw_token = _bearer_token(request.headers.get("authorization"))
         if raw_token is None and request.url.path.endswith(
@@ -314,6 +320,7 @@ SessionDep = Annotated[AsyncSession, Depends(session_dependency)]
 SourceFile = Annotated[UploadFile, File()]
 Authorization = Annotated[str | None, Header()]
 app.include_router(create_capability_router(settings, store, session_dependency))
+app.include_router(create_usage_router(settings, session_dependency, current_user_id))
 
 
 @app.get("/health")
@@ -1097,13 +1104,35 @@ async def tutor_messages(project_id: UUID, session: SessionDep):
     return active
 
 
+async def _usage_rows_for(ledger, *, project_id: UUID | None, operation: str) -> list:
+    """Usage rows for one chat turn, priced where the provider reported no cost."""
+    if not ledger.entries:
+        return []
+    try:
+        if any(entry.cost_usd is None for entry in ledger.entries):
+            ledger.estimate_missing_costs(await openrouter_prices(settings))
+        return usage_rows(
+            ledger,
+            user_id=current_user_id.get(),
+            project_id=project_id,
+            operation=operation,
+            run_id=new_run_id(),
+        )
+    except Exception as error:  # noqa: BLE001 - accounting must never fail a chat turn
+        logger.warning("Could not record chat usage: %s", error)
+        return []
+
+
 async def _respond_to_chat(
     project_id: UUID,
     project: Project,
     payload: TutorChatRequest,
     session: AsyncSession,
 ) -> TutorChatResponse:
-    decision = await tutor_respond(session, settings, project, payload)
+    with track_usage() as ledger:
+        decision = await tutor_respond(session, settings, project, payload)
+    # Saved with this turn's messages in the commit below.
+    session.add_all(await _usage_rows_for(ledger, project_id=project_id, operation="chat"))
     workflow_id = run_id = None
     if decision.base_version is not None:
         # The learner meant an earlier video: make it current before changing it.
@@ -1197,7 +1226,13 @@ async def tutor_chat(project_id: UUID, payload: TutorChatRequest, session: Sessi
 
 @app.post("/v1/temporary-chat", response_model=TutorChatResponse)
 async def temporary_chat(payload: TemporaryChatRequest):
-    message = await respond_ephemeral(settings, payload, payload.history)
+    with track_usage() as ledger:
+        message = await respond_ephemeral(settings, payload, payload.history)
+    rows = await _usage_rows_for(ledger, project_id=None, operation="temporary_chat")
+    if rows:
+        async with database.sessions() as session:
+            session.add_all(rows)
+            await session.commit()
     return TutorChatResponse(message=message, canonical_message=message)
 
 

@@ -12,6 +12,7 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -27,6 +28,12 @@ class UsageEntry:
     cost_usd: float | None = None
     # Characters spoken or translated, for services billed per character.
     characters: int = 0
+    provider: str = ""
+    scene: str | None = None
+    latency_ms: float | None = None
+    # ok | fallback (served by a fallback model) | error (a failed, retried attempt)
+    status: str = "ok"
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -97,6 +104,16 @@ _STAGE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
+_SCENE: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "scholarmotion_usage_scene", default=None
+)
+
+
+def set_usage_scene(scene_id: str | None) -> None:
+    """Label later calls in this task (each scene runs in its own task) with a scene."""
+    _SCENE.set(scene_id)
+
+
 @contextmanager
 def usage_stage(name: str) -> Iterator[None]:
     """Label model calls made inside this block with a pipeline stage."""
@@ -139,7 +156,15 @@ def _int(value: Any) -> int:
         return 0
 
 
-def record_usage(response: Any, *, purpose: str, model: str) -> None:
+def record_usage(
+    response: Any,
+    *,
+    purpose: str,
+    model: str,
+    provider: str = "",
+    latency_ms: float | None = None,
+    status: str = "ok",
+) -> None:
     """Record a Chat Completions or Responses API result's usage, if tracked."""
     ledger = _LEDGER.get()
     if ledger is None:
@@ -175,6 +200,29 @@ def record_usage(response: Any, *, purpose: str, model: str) -> None:
             cache_write_tokens=_int(_field(prompt_details, "cache_write_tokens")),
             reasoning_tokens=_int(_field(output_details, "reasoning_tokens")),
             cost_usd=cost,
+            provider=provider,
+            scene=_SCENE.get(),
+            latency_ms=latency_ms,
+            status=status,
+        )
+    )
+
+
+def record_failure(*, purpose: str, model: str, provider: str, latency_ms: float) -> None:
+    """Record an attempt that failed and was retried on another model."""
+    ledger = _LEDGER.get()
+    if ledger is None:
+        return
+    stage = _STAGE.get()
+    ledger.add(
+        UsageEntry(
+            purpose=f"{stage}:{purpose}" if stage else purpose,
+            model=model,
+            cost_usd=0.0,
+            provider=provider,
+            scene=_SCENE.get(),
+            latency_ms=latency_ms,
+            status="error",
         )
     )
 
@@ -187,6 +235,8 @@ def record_service_usage(
     input_tokens: int = 0,
     output_tokens: int = 0,
     characters: int = 0,
+    provider: str = "",
+    latency_ms: float | None = None,
 ) -> None:
     """Record a non-LLM service call (machine translation, TTS), if tracked."""
     ledger = _LEDGER.get()
@@ -201,5 +251,8 @@ def record_service_usage(
             output_tokens=output_tokens,
             characters=characters,
             cost_usd=cost_usd,
+            provider=provider,
+            scene=_SCENE.get(),
+            latency_ms=latency_ms,
         )
     )

@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     bodhan_tts_style: str = "educational lecture"
     # Dollars per rupee, for showing Bodhan's INR prices in dollars.
     usd_per_inr: float = Field(default=0.012, gt=0)
+    # Usernames (comma-separated) whose usage dashboard can switch to all users.
+    admin_usernames: str = "admin"
     stt_provider: str = "mock"
     stt_api_key: str | None = None
     stt_model: str = "deterministic-v1"

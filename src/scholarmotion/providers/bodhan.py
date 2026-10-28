@@ -14,6 +14,7 @@ import asyncio
 import io
 import json
 import re
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -118,6 +119,7 @@ class BodhanTranslator:
         code = bodhan_language(target_language)
         if code is None:
             raise BodhanError(f"{target_language} is not supported by Bodhan")
+        started = time.perf_counter()
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             response = await _post(
                 client,
@@ -134,6 +136,7 @@ class BodhanTranslator:
             usage,
             characters=len(text),
             cost_usd=output_tokens * TRANSLATE_INR_PER_OUTPUT_TOKEN * self.usd_per_inr,
+            latency_ms=(time.perf_counter() - started) * 1000,
         )
         return BodhanTranslation(
             text=str(body.get("translation", "")).strip(),
@@ -221,6 +224,7 @@ class BodhanTTSProvider:
         if not any(plan):
             raise BodhanError("nothing to speak")
         limit = asyncio.Semaphore(self.concurrency)
+        started = time.perf_counter()
 
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
 
@@ -261,6 +265,7 @@ class BodhanTTSProvider:
             {},
             characters=len(spoken),
             cost_usd=len(spoken) * SPEAK_INR_PER_CHARACTER * self.usd_per_inr,
+            latency_ms=(time.perf_counter() - started) * 1000,
         )
         duration = wav_duration(str(output_path))
         return TTSResult(
@@ -292,7 +297,13 @@ class LanguageRoutedTTS:
 
 
 def _record_usage(
-    purpose: str, model: str, usage: dict, *, characters: int, cost_usd: float
+    purpose: str,
+    model: str,
+    usage: dict,
+    *,
+    characters: int,
+    cost_usd: float,
+    latency_ms: float | None = None,
 ) -> None:
     """Add this call to the build's usage ledger, if one is open."""
     record_service_usage(
@@ -302,6 +313,8 @@ def _record_usage(
         input_tokens=int(usage.get("prompt_tokens") or 0),
         output_tokens=int(usage.get("completion_tokens") or 0),
         characters=characters,
+        provider="bodhan",
+        latency_ms=latency_ms,
     )
 
 

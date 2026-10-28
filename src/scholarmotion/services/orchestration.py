@@ -45,7 +45,7 @@ from scholarmotion.media.speech import to_speakable
 from scholarmotion.media.subtitles import cues_to_srt, cues_to_vtt, merge_scene_cues
 from scholarmotion.media.timeline import build_timeline, media_duration
 from scholarmotion.memory.correction_memory import CorrectionMemory
-from scholarmotion.observability.usage import usage_stage
+from scholarmotion.observability.usage import set_usage_scene, usage_stage
 from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.schemas import (
     NarrationBlock,
@@ -802,7 +802,8 @@ class ScholarMotionPipeline:
                 "scenes": [f"{spec.scene_id}: {spec.title}" for spec in specs],
             },
         )
-        await self._synthesize_lesson_narration(project_id, specs)
+        with usage_stage("narration"):
+            await self._synthesize_lesson_narration(project_id, specs)
         # The session-backed correction/skill queries happen before fan-out.
         # SQLAlchemy AsyncSession is not safe for concurrent use; scene tasks
         # themselves are now independent and can generate, render, and verify
@@ -990,6 +991,8 @@ class ScholarMotionPipeline:
         prefetched_corrections=None,
         code_skill_context: str | None = None,
     ) -> ProducedScene:
+        # Each scene runs in its own task, so this labels only this scene's calls.
+        set_usage_scene(spec.scene_id)
         events = events if events is not None else []
         base = f"{project_id}/scenes/{spec.scene_id}"
         artifact_version = artifact_version or spec.version

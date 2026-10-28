@@ -6,6 +6,7 @@ import asyncio
 import re
 import shutil
 import sys
+import time
 import wave
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import httpx
 
 from scholarmotion.media.audio import estimate_sentence_timings, wav_duration
 from scholarmotion.media.speech import to_speakable
+from scholarmotion.observability.usage import record_service_usage
 from scholarmotion.schemas import TTSResult
 
 
@@ -48,6 +50,7 @@ class OpenAICompatibleTTSProvider:
         # Keep paragraph breaks: a whole-lesson take uses them as scene pauses.
         paragraphs = [to_speakable(part) for part in re.split(r"\n\s*\n", text)]
         text = "\n\n".join(part for part in paragraphs if part)
+        started = time.perf_counter()
         async with httpx.AsyncClient(timeout=300) as client:
             payload = {
                 "model": self.model,
@@ -70,6 +73,16 @@ class OpenAICompatibleTTSProvider:
                 json=payload,
             )
             response.raise_for_status()
+        # The speech endpoint reports no usage; ~4 characters per token prices it roughly.
+        record_service_usage(
+            purpose="tts",
+            model=self.model,
+            cost_usd=None,
+            input_tokens=max(1, len(text) // 4),
+            characters=len(text),
+            provider="openrouter" if "openrouter.ai" in self.base_url else self.name,
+            latency_ms=(time.perf_counter() - started) * 1000,
+        )
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if self.response_format == "pcm":
             if len(response.content) < 2 or len(response.content) % 2:
