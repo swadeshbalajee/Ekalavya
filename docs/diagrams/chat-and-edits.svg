@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1820 1251" width="1820" height="1251" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<title>Chat turns, edits and memory</title>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker><marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+<rect width="1820" height="1251" fill="#ffffff"/>
+<text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">Chat turns, edits and memory</text>
+<text x="40" y="70" font-size="13.5" fill="#475569">What happens on POST /v1/projects/{id}/chat (api/main.py, api/tutor.py) and how an edit rebuilds only what it invalidates.</text>
+<rect x="40.0" y="848.0" width="1748.5" height="197.0" rx="12" fill="#ffffff" fill-opacity="0.45" stroke="#cbd5e1" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text x="52.0" y="866.0" font-size="12" font-weight="600" fill="#334155">artifact dependencies (editing/dependencies.py): an edit marks its root stale, then everything downstream of it</text>
+<rect x="40.0" y="100.0" width="260.0" height="96.0" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="52.0" y="126.0" font-size="14" font-weight="600" fill="#064e3b" >Learner message</text>
+<circle cx="55.0" cy="144.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="148.0" font-size="12" fill="#334155" >text or voice (STT), any language</text>
+<circle cx="55.0" cy="160.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="164.0" font-size="12" fill="#334155" >may contain links or a video time</text>
+<text x="62.0" y="180.0" font-size="12" fill="#334155" >range</text>
+<rect x="340.0" y="100.0" width="400.0" height="96.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+<text x="352.0" y="126.0" font-size="14" font-weight="600" fill="#1e3a8a" >Context for the planner</text>
+<circle cx="355.0" cy="144.0" r="1.8" fill="#64748b"/>
+<text x="362.0" y="148.0" font-size="12" fill="#334155" >chat summary + last 7 user turns word for word</text>
+<circle cx="355.0" cy="160.0" r="1.8" fill="#64748b"/>
+<text x="362.0" y="164.0" font-size="12" fill="#334155" >attached papers and sources</text>
+<circle cx="355.0" cy="176.0" r="1.8" fill="#64748b"/>
+<text x="362.0" y="180.0" font-size="12" fill="#334155" >the chat&#x27;s videos with scene ids and times</text>
+<rect x="780.0" y="100.0" width="330.0" height="96.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<rect x="1043.9" y="108.0" width="58.1" height="18" rx="9" fill="#ede9fe"/><text x="1073.0" y="121.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">planner</text>
+<text x="792.0" y="126.0" font-size="14" font-weight="600" fill="#7c3d0c" >prepare_lesson</text>
+<circle cx="795.0" cy="144.0" r="1.8" fill="#64748b"/>
+<text x="802.0" y="148.0" font-size="12" fill="#334155" >chooses the action by meaning, not keywords</text>
+<circle cx="795.0" cy="160.0" r="1.8" fill="#64748b"/>
+<text x="802.0" y="164.0" font-size="12" fill="#334155" >languages, length, scope, canonical English</text>
+<rect x="1150.0" y="96.0" width="630.0" height="64.0" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<rect x="1707.6" y="104.0" width="64.4" height="18" rx="9" fill="#ede9fe"/><text x="1739.8" y="117.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">main LLM</text>
+<text x="1162.0" y="122.0" font-size="14" font-weight="600" fill="#064e3b" >answer → tutor reply</text>
+<circle cx="1165.0" cy="140.0" r="1.8" fill="#64748b"/>
+<text x="1172.0" y="144.0" font-size="12" fill="#334155" >paper and source context; the reply is checked and corrected once; saved to the chat</text>
+<rect x="1150.0" y="170.0" width="630.0" height="64.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1162.0" y="196.0" font-size="14" font-weight="600" fill="#7c3d0c" >make video → BuildVideoWorkflow</text>
+<circle cx="1165.0" cy="214.0" r="1.8" fill="#64748b"/>
+<text x="1172.0" y="218.0" font-size="12" fill="#334155" >the full lesson pipeline (lesson-pipeline.svg); each later video is a new version</text>
+<rect x="1150.0" y="244.0" width="630.0" height="64.0" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+<text x="1162.0" y="270.0" font-size="14" font-weight="600" fill="#78350f" >edit video → EditProjectWorkflow</text>
+<circle cx="1165.0" cy="288.0" r="1.8" fill="#64748b"/>
+<text x="1172.0" y="292.0" font-size="12" fill="#334155" >time range or scene ids + instruction; see the edit flow below</text>
+<rect x="1150.0" y="318.0" width="630.0" height="80.0" rx="9" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="1.5"/>
+<rect x="1688.7" y="326.0" width="83.3" height="18" rx="9" fill="#e0f2fe"/><text x="1730.4" y="339.0" font-size="10.5" font-weight="600" fill="#075985" text-anchor="middle">translation</text>
+<text x="1162.0" y="344.0" font-size="14" font-weight="600" fill="#4c1d95" >localize → LocalizeProjectWorkflow</text>
+<circle cx="1165.0" cy="362.0" r="1.8" fill="#64748b"/>
+<text x="1172.0" y="366.0" font-size="12" fill="#334155" >screen text and narration translated again from canonical English; new speech, render,</text>
+<text x="1172.0" y="382.0" font-size="12" fill="#334155" >assembly</text>
+<rect x="40.0" y="474.0" width="420.0" height="128.0" rx="9" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="1.5"/>
+<rect x="393.9" y="482.0" width="58.1" height="18" rx="9" fill="#ede9fe"/><text x="422.9" y="495.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">planner</text>
+<text x="52.0" y="500.0" font-size="14" font-weight="600" fill="#4c1d95" >Chat title</text>
+<circle cx="55.0" cy="518.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="522.0" font-size="12" fill="#334155" >written from the first message, in the learner&#x27;s language</text>
+<circle cx="55.0" cy="534.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="538.0" font-size="12" fill="#334155" >never overwrites a title the learner set; does not reorder</text>
+<text x="62.0" y="554.0" font-size="12" fill="#334155" >the chat list</text>
+<rect x="480.0" y="474.0" width="420.0" height="128.0" rx="9" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="1.5"/>
+<rect x="833.9" y="482.0" width="58.1" height="18" rx="9" fill="#ede9fe"/><text x="862.9" y="495.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">planner</text>
+<text x="492.0" y="500.0" font-size="14" font-weight="600" fill="#4c1d95" >Chat compaction</text>
+<circle cx="495.0" cy="518.0" r="1.8" fill="#64748b"/>
+<text x="502.0" y="522.0" font-size="12" fill="#334155" >when older turns pass 3,000 characters they are summarised</text>
+<circle cx="495.0" cy="534.0" r="1.8" fill="#64748b"/>
+<text x="502.0" y="538.0" font-size="12" fill="#334155" >keeps preferences, videos made, open confusion</text>
+<circle cx="495.0" cy="550.0" r="1.8" fill="#64748b"/>
+<text x="502.0" y="554.0" font-size="12" fill="#334155" >editing a summarised message clears the summary</text>
+<rect x="920.0" y="474.0" width="420.0" height="128.0" rx="9" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="1.5"/>
+<rect x="1273.9" y="482.0" width="58.1" height="18" rx="9" fill="#ede9fe"/><text x="1303.0" y="495.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">planner</text>
+<text x="932.0" y="500.0" font-size="14" font-weight="600" fill="#4c1d95" >Knowledge map</text>
+<circle cx="935.0" cy="518.0" r="1.8" fill="#64748b"/>
+<text x="942.0" y="522.0" font-size="12" fill="#334155" >when the map is opened: chats with messages newer than their</text>
+<text x="942.0" y="538.0" font-size="12" fill="#334155" >last sync</text>
+<circle cx="935.0" cy="550.0" r="1.8" fill="#64748b"/>
+<text x="942.0" y="554.0" font-size="12" fill="#334155" >concepts and relations in the model&#x27;s own words, reused</text>
+<text x="942.0" y="570.0" font-size="12" fill="#334155" >across chats</text>
+<circle cx="935.0" cy="582.0" r="1.8" fill="#64748b"/>
+<text x="942.0" y="586.0" font-size="12" fill="#334155" >Postgres graph + concept vectors in Qdrant</text>
+<rect x="1360.0" y="474.0" width="420.0" height="128.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+<text x="1372.0" y="500.0" font-size="14" font-weight="600" fill="#1e3a8a" >Usage records</text>
+<circle cx="1375.0" cy="518.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="522.0" font-size="12" fill="#334155" >every model call in the turn: purpose, model, tokens, cost,</text>
+<text x="1382.0" y="538.0" font-size="12" fill="#334155" >time</text>
+<rect x="40.0" y="698.0" width="280.0" height="128.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+<text x="52.0" y="724.0" font-size="14" font-weight="600" fill="#1e3a8a" >Affected scenes</text>
+<circle cx="55.0" cy="742.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="746.0" font-size="12" fill="#334155" >scenes overlapping the time range, or</text>
+<text x="62.0" y="762.0" font-size="12" fill="#334155" >the scene ids the planner chose</text>
+<rect x="356.0" y="698.0" width="300.0" height="128.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<rect x="589.9" y="706.0" width="58.1" height="18" rx="9" fill="#ede9fe"/><text x="618.9" y="719.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">planner</text>
+<text x="368.0" y="724.0" font-size="14" font-weight="600" fill="#7c3d0c" >Classify the feedback</text>
+<circle cx="371.0" cy="742.0" r="1.8" fill="#64748b"/>
+<text x="378.0" y="746.0" font-size="12" fill="#334155" >type, category, memory_eligible</text>
+<circle cx="371.0" cy="758.0" r="1.8" fill="#64748b"/>
+<text x="378.0" y="762.0" font-size="12" fill="#334155" >without a model: treated as a content</text>
+<text x="378.0" y="778.0" font-size="12" fill="#334155" >change (rebuilds the most)</text>
+<rect x="692.0" y="698.0" width="330.0" height="128.0" rx="9" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+<text x="704.0" y="724.0" font-size="14" font-weight="600" fill="#78350f" >Where staleness starts</text>
+<circle cx="707.0" cy="742.0" r="1.8" fill="#64748b"/>
+<text x="714.0" y="746.0" font-size="12" fill="#334155" >visual defect, style → code</text>
+<circle cx="707.0" cy="758.0" r="1.8" fill="#64748b"/>
+<text x="714.0" y="762.0" font-size="12" fill="#334155" >math defect → spec</text>
+<circle cx="707.0" cy="774.0" r="1.8" fill="#64748b"/>
+<text x="714.0" y="778.0" font-size="12" fill="#334155" >audio or timing defect → audio</text>
+<circle cx="707.0" cy="790.0" r="1.8" fill="#64748b"/>
+<text x="714.0" y="794.0" font-size="12" fill="#334155" >content edit, semantic defect → pedagogy</text>
+<circle cx="707.0" cy="806.0" r="1.8" fill="#64748b"/>
+<text x="714.0" y="810.0" font-size="12" fill="#334155" >anything else → profile</text>
+<rect x="54.0" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="114.0" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">profile</text>
+<rect x="199.5" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="259.5" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">curriculum</text>
+<rect x="345.0" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="405.0" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">pedagogy</text>
+<rect x="490.5" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="550.5" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">script</text>
+<rect x="636.0" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="696.0" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">storyboard</text>
+<rect x="781.5" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="841.5" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">spec</text>
+<rect x="927.0" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="987.0" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">code</text>
+<rect x="1072.5" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1132.5" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">timing</text>
+<rect x="1218.0" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1278.0" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">render</text>
+<rect x="1363.5" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1423.5" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">verification</text>
+<rect x="1509.0" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1569.0" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">video</text>
+<rect x="1654.5" y="900.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1714.5" y="925.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">timeline</text>
+<rect x="927.0" y="990.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="987.0" y="1015.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">audio</text>
+<rect x="1509.0" y="990.0" width="120.0" height="41.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="1569.0" y="1015.0" font-size="13" font-weight="600" fill="#7c3d0c" text-anchor="middle">subtitles</text>
+<rect x="40.0" y="1085.0" width="420.0" height="96.0" rx="9" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="1.5"/>
+<rect x="387.6" y="1093.0" width="64.4" height="18" rx="9" fill="#fae8ff"/><text x="419.8" y="1106.0" font-size="10.5" font-weight="600" fill="#86198f" text-anchor="middle">code LLM</text>
+<text x="52.0" y="1111.0" font-size="14" font-weight="600" fill="#4c1d95" >Rebuild the affected scenes</text>
+<circle cx="55.0" cy="1129.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="1133.0" font-size="12" fill="#334155" >only stale artifacts are regenerated; new speech only when</text>
+<text x="62.0" y="1149.0" font-size="12" fill="#334155" >audio is stale</text>
+<circle cx="55.0" cy="1161.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="1165.0" font-size="12" fill="#334155" >same scene path: code, render, verify, repair</text>
+<rect x="500.0" y="1085.0" width="380.0" height="96.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<rect x="826.5" y="1093.0" width="45.5" height="18" rx="9" fill="#e2e8f0"/><text x="849.2" y="1106.0" font-size="10.5" font-weight="600" fill="#334155" text-anchor="middle">local</text>
+<text x="512.0" y="1111.0" font-size="14" font-weight="600" fill="#7c3d0c" >Reassemble</text>
+<circle cx="515.0" cy="1129.0" r="1.8" fill="#64748b"/>
+<text x="522.0" y="1133.0" font-size="12" fill="#334155" >unchanged scenes reused; new video version, captions</text>
+<text x="522.0" y="1149.0" font-size="12" fill="#334155" >and timeline</text>
+<rect x="920.0" y="1085.0" width="420.0" height="96.0" rx="9" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
+<text x="932.0" y="1111.0" font-size="14" font-weight="600" fill="#713f12" >Remember</text>
+<circle cx="935.0" cy="1129.0" r="1.8" fill="#64748b"/>
+<text x="942.0" y="1133.0" font-size="12" fill="#334155" >a FeedbackEvent per classification</text>
+<circle cx="935.0" cy="1145.0" r="1.8" fill="#64748b"/>
+<text x="942.0" y="1149.0" font-size="12" fill="#334155" >memory-eligible feedback → correction evidence (learning-</text>
+<text x="942.0" y="1165.0" font-size="12" fill="#334155" >loop.svg)</text>
+<path d="M300.0,148.0 L340.0,148.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M740.0,148.0 L780.0,148.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M1110.0,148.0 L1130.0,148.0 L1130.0,128.0 L1150.0,128.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M1110.0,148.0 L1130.0,148.0 L1130.0,202.0 L1150.0,202.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M1110.0,148.0 L1130.0,148.0 L1130.0,276.0 L1150.0,276.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M1110.0,148.0 L1130.0,148.0 L1130.0,358.0 L1150.0,358.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="40.0" y="448.0" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">After every chat turn: background work, off the request</text>
+<text x="40.0" y="658.0" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Edit flow: rebuild only what the edit invalidates</text>
+<text x="40.0" y="678.0" font-size="12" font-weight="400" fill="#475569" text-anchor="start">api/service.py edit_range, agents/feedback_classifier.py, editing/dependencies.py</text>
+<path d="M320.0,762.0 L356.0,762.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M656.0,762.0 L692.0,762.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M174.0,920.5 L199.5,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M319.5,920.5 L345.0,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M465.0,920.5 L490.5,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M610.5,920.5 L636.0,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M756.0,920.5 L781.5,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M901.5,920.5 L927.0,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1047.0,920.5 L1072.5,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1192.5,920.5 L1218.0,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1338.0,920.5 L1363.5,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1483.5,920.5 L1509.0,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1629.0,920.5 L1654.5,920.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M550.5,941.0 L550.5,1010.5 L927.0,1010.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M841.5,941.0 L841.5,1010.5 L927.0,1010.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1047.0,1010.5 L1509.0,1010.5" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1132.5,1010.5 L1132.5,941.0" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<path d="M1278.0,1010.5 L1278.0,941.0" fill="none" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-muted)"/>
+<rect x="65.7" y="874.0" width="96.6" height="18" rx="9" fill="#d97706"/><text x="114.0" y="887.0" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">anything else</text>
+<rect x="341.2" y="874.0" width="127.6" height="18" rx="9" fill="#d97706"/><text x="405.0" y="887.0" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">content · semantic</text>
+<rect x="821.1" y="874.0" width="40.8" height="18" rx="9" fill="#d97706"/><text x="841.5" y="887.0" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">math</text>
+<rect x="935.6" y="874.0" width="102.8" height="18" rx="9" fill="#d97706"/><text x="987.0" y="887.0" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">visual · style</text>
+<rect x="935.6" y="964.0" width="102.8" height="18" rx="9" fill="#d97706"/><text x="987.0" y="977.0" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">audio · timing</text>
+<path d="M857.0,826.0 L857.0,837.0 L1114.2,837.0 L1114.2,848.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M460.0,1133.0 L500.0,1133.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M880.0,1133.0 L920.0,1133.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M250.0,1045.0 L250.0,1085.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<text x="40.0" y="1225.0" font-size="12" font-weight="700" fill="#0f172a" text-anchor="start">Legend</text>
+<rect x="100" y="1212" width="30" height="18" rx="5" fill="#e6f7f2" stroke="#10a37f"/>
+<text x="138.0" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">learner-facing</text>
+<rect x="253.60000000000002" y="1212" width="30" height="18" rx="5" fill="#fff4e5" stroke="#f0a04b"/>
+<text x="291.6" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">step</text>
+<rect x="343.20000000000005" y="1212" width="30" height="18" rx="5" fill="#f3e8ff" stroke="#8b5cf6"/>
+<text x="381.2" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">model work</text>
+<rect x="471.20000000000005" y="1212" width="30" height="18" rx="5" fill="#e8f1fd" stroke="#4a86e8"/>
+<text x="509.2" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">data</text>
+<rect x="560.8000000000001" y="1212" width="30" height="18" rx="5" fill="#fffbeb" stroke="#d97706"/>
+<text x="598.8" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">decision</text>
+<rect x="676.0000000000001" y="1212" width="30" height="18" rx="5" fill="#fefce8" stroke="#ca8a04"/>
+<text x="714.0" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">memory</text>
+<rect x="778.4000000000001" y="1212" width="30" height="18" rx="5" fill="#ffffff" stroke="#cbd5e1"/>
+<text x="816.4" y="1225.0" font-size="12" font-weight="400" fill="#334155" text-anchor="start">graph</text>
+</svg>

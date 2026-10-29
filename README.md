@@ -101,7 +101,11 @@ Named after Ekalavya, the self-taught archer of the Mahabharata who learned by w
 - **Qdrant** holds only embeddings that can be rebuilt.
 - **Temporal** makes long builds durable and cancellable.
 
-More detail is in [docs/system-design.md](docs/system-design.md).
+More detail is in [docs/system-design.md](docs/system-design.md), with diagrams of:
+- [one video build](docs/diagrams/lesson-pipeline.svg);
+- [one scene](docs/diagrams/scene-production.svg);
+- [correction memory and skills](docs/diagrams/learning-loop.svg);
+- [chat turns and edits](docs/diagrams/chat-and-edits.svg).
 
 ### The lesson pipeline
 

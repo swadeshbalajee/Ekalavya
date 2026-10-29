@@ -1,89 +1,185 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 650" width="900" height="650" font-family="Segoe UI, Helvetica, Arial, sans-serif">
-  <title>Ekalavya architecture</title>
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
-    </marker>
-    <style>
-      .t { font-size: 15px; font-weight: 600; fill: #0f172a; }
-      .s { font-size: 12px; fill: #475569; }
-      .g { font-size: 13px; font-weight: 600; fill: #9a5b13; }
-      .d { font-size: 13px; font-weight: 600; fill: #1d4ed8; }
-      .e { font-size: 11.5px; fill: #334155; font-style: italic; }
-      .line { stroke: #334155; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
-    </style>
-  </defs>
-  <rect width="900" height="650" fill="#ffffff"/>
-
-  <!-- Learner-facing column -->
-  <rect x="60" y="40" width="190" height="70" rx="10" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
-  <text x="155" y="70" class="t" text-anchor="middle">Streamlit UI</text>
-  <text x="155" y="90" class="s" text-anchor="middle">chat · player · scene edits</text>
-
-  <rect x="60" y="170" width="190" height="70" rx="10" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
-  <text x="155" y="200" class="t" text-anchor="middle">FastAPI</text>
-  <text x="155" y="220" class="s" text-anchor="middle">auth · chats · sources · progress</text>
-
-  <rect x="50" y="290" width="210" height="190" rx="12" fill="#f5f9ff" stroke="#4a86e8" stroke-dasharray="5 4"/>
-  <text x="66" y="312" class="d">Data</text>
-  <rect x="70" y="325" width="170" height="60" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
-  <text x="155" y="350" class="t" text-anchor="middle">PostgreSQL</text>
-  <text x="155" y="369" class="s" text-anchor="middle">source of truth</text>
-  <rect x="70" y="400" width="170" height="60" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
-  <text x="155" y="425" class="t" text-anchor="middle">Qdrant</text>
-  <text x="155" y="444" class="s" text-anchor="middle">retrieval index</text>
-
-  <!-- Durable pipeline column -->
-  <rect x="315" y="40" width="250" height="50" rx="10" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
-  <text x="440" y="70" class="t" text-anchor="middle">Temporal workflow</text>
-
-  <rect x="300" y="120" width="280" height="470" rx="12" fill="#fffaf2" stroke="#f0a04b" stroke-dasharray="5 4"/>
-  <text x="316" y="142" class="g">Worker: lesson pipeline</text>
-
-  <rect x="315" y="155" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
-  <text x="440" y="180" class="t" text-anchor="middle">1 · Prepare</text>
-  <text x="440" y="199" class="s" text-anchor="middle">intent · language · sources</text>
-
-  <rect x="315" y="240" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
-  <text x="440" y="265" class="t" text-anchor="middle">2 · Script + review</text>
-  <text x="440" y="284" class="s" text-anchor="middle">whole lesson, self-reviewed</text>
-
-  <rect x="315" y="325" width="250" height="80" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
-  <text x="440" y="350" class="t" text-anchor="middle">3 · Per scene, in parallel</text>
-  <text x="440" y="369" class="s" text-anchor="middle">storyboard → TTS → Manim code</text>
-  <text x="440" y="386" class="s" text-anchor="middle">→ render → verify → repair</text>
-
-  <rect x="315" y="430" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
-  <text x="440" y="455" class="t" text-anchor="middle">4 · Whole-lesson review</text>
-  <text x="440" y="474" class="s" text-anchor="middle">rebuilds up to 3 weak scenes</text>
-
-  <rect x="315" y="515" width="250" height="60" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
-  <text x="440" y="540" class="t" text-anchor="middle">5 · FFmpeg assembly</text>
-  <text x="440" y="559" class="s" text-anchor="middle">MP4 · captions · chapters</text>
-
-  <!-- Providers and artifacts column -->
-  <rect x="640" y="290" width="230" height="90" rx="10" fill="#f3ebfd" stroke="#8e6bd8" stroke-width="1.5"/>
-  <text x="755" y="318" class="t" text-anchor="middle">Model providers</text>
-  <text x="755" y="338" class="s" text-anchor="middle">OpenRouter · Bodhan</text>
-  <text x="755" y="356" class="s" text-anchor="middle">LLM · translation · TTS · STT</text>
-
-  <rect x="640" y="510" width="230" height="70" rx="10" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
-  <text x="755" y="540" class="t" text-anchor="middle">Artifact store</text>
-  <text x="755" y="560" class="s" text-anchor="middle">projects/ · MP4 · audio · VTT</text>
-
-  <!-- Arrows -->
-  <path class="line" d="M155,110 V168"/>
-  <path class="line" d="M250,190 H285 V65 H313"/>
-  <path class="line" d="M155,240 V288"/>
-  <path class="line" d="M440,90 V153"/>
-  <path class="line" d="M440,215 V238"/>
-  <path class="line" d="M440,300 V323"/>
-  <path class="line" d="M440,405 V428"/>
-  <path class="line" d="M440,490 V513"/>
-  <path class="line" d="M300,385 H262"/>
-  <text x="281" y="377" class="e" text-anchor="middle">writes</text>
-  <path class="line" d="M580,335 H638"/>
-  <path class="line" d="M565,545 H638"/>
-  <path class="line" d="M755,580 V620 H30 V75 H58"/>
-  <text x="440" y="612" class="e" text-anchor="middle">video + captions stream back to the player</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1820 950" width="1820" height="950" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<title>Ekalavya system architecture</title>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker><marker id="arrow-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>
+<rect width="1820" height="950" fill="#ffffff"/>
+<text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">Ekalavya system architecture</text>
+<text x="40" y="70" font-size="13.5" fill="#475569">Docker Compose services and what each one owns. The detailed flows are in the other diagrams in docs/diagrams/.</text>
+<rect x="406.0" y="112.0" width="408.0" height="527.5" rx="12" fill="#e6f7f2" fill-opacity="0.45" stroke="#10a37f" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text x="418.0" y="130.0" font-size="12" font-weight="600" fill="#064e3b">api (FastAPI, :8000): control plane, no rendering</text>
+<rect x="880.0" y="280.0" width="400.0" height="292.0" rx="12" fill="#fff4e5" fill-opacity="0.45" stroke="#f0a04b" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text x="892.0" y="298.0" font-size="12" font-weight="600" fill="#7c3d0c">worker: Temporal activities, scenes in parallel</text>
+<rect x="40.0" y="691.5" width="1748.0" height="122.0" rx="12" fill="#f1f5f9" fill-opacity="0.45" stroke="#64748b" stroke-width="1.3" stroke-dasharray="6 4"/>
+<text x="52.0" y="709.5" font-size="12" font-weight="600" fill="#0f172a">Model providers: one model and a fallback per capability, set in .env</text>
+<rect x="40.0" y="110.0" width="300.0" height="128.0" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="52.0" y="136.0" font-size="14" font-weight="600" fill="#064e3b" >Ekalavya web app</text>
+<circle cx="55.0" cy="154.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="158.0" font-size="12" fill="#334155" >React + Vite single-page app</text>
+<circle cx="55.0" cy="170.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="174.0" font-size="12" fill="#334155" >Home · Chat · Watch · Discover · Library</text>
+<circle cx="55.0" cy="186.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="190.0" font-size="12" fill="#334155" >Study plan · Quiz · Knowledge map · Usage</text>
+<circle cx="55.0" cy="202.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="206.0" font-size="12" fill="#334155" >Settings: languages, voice, research</text>
+<text x="62.0" y="222.0" font-size="12" fill="#334155" >depth</text>
+<rect x="40.0" y="298.0" width="300.0" height="112.0" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="52.0" y="324.0" font-size="14" font-weight="600" fill="#064e3b" >web (nginx, :8080)</text>
+<circle cx="55.0" cy="342.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="346.0" font-size="12" fill="#334155" >serves the built app</text>
+<circle cx="55.0" cy="358.0" r="1.8" fill="#64748b"/>
+<text x="62.0" y="362.0" font-size="12" fill="#334155" >/api → api:8000, looked up on every</text>
+<text x="62.0" y="378.0" font-size="12" fill="#334155" >request so an API restart never leaves a</text>
+<text x="62.0" y="394.0" font-size="12" fill="#334155" >stale address</text>
+<rect x="420.0" y="140.0" width="380.0" height="62.5" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="432.0" y="165.0" font-size="13" font-weight="600" fill="#064e3b" >Accounts</text>
+<circle cx="435.0" cy="182.5" r="1.8" fill="#64748b"/>
+<text x="442.0" y="186.5" font-size="11.5" fill="#334155" >auth, profile, research settings (clamped)</text>
+<rect x="420.0" y="210.5" width="380.0" height="62.5" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="432.0" y="235.5" font-size="13" font-weight="600" fill="#064e3b" >Chats and tutor</text>
+<circle cx="435.0" cy="253.0" r="1.8" fill="#64748b"/>
+<text x="442.0" y="257.0" font-size="11.5" fill="#334155" >chat turns, message edits, titles, compaction</text>
+<rect x="420.0" y="281.0" width="380.0" height="62.5" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="432.0" y="306.0" font-size="13" font-weight="600" fill="#064e3b" >Sources</text>
+<circle cx="435.0" cy="323.5" r="1.8" fill="#64748b"/>
+<text x="442.0" y="327.5" font-size="11.5" fill="#334155" >PDF upload, links (SSRF-safe), library ingest</text>
+<rect x="420.0" y="351.5" width="380.0" height="62.5" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="432.0" y="376.5" font-size="13" font-weight="600" fill="#064e3b" >Videos</text>
+<circle cx="435.0" cy="394.0" r="1.8" fill="#64748b"/>
+<text x="442.0" y="398.0" font-size="11.5" fill="#334155" >builds, edits, versions, progress, media streaming</text>
+<rect x="420.0" y="422.0" width="380.0" height="62.5" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="432.0" y="447.0" font-size="13" font-weight="600" fill="#064e3b" >Learning</text>
+<circle cx="435.0" cy="464.5" r="1.8" fill="#64748b"/>
+<text x="442.0" y="468.5" font-size="11.5" fill="#334155" >catalog, study plans, quizzes, notes, playlists</text>
+<rect x="420.0" y="492.5" width="380.0" height="62.5" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
+<text x="432.0" y="517.5" font-size="13" font-weight="600" fill="#064e3b" >Knowledge map and usage</text>
+<circle cx="435.0" cy="535.0" r="1.8" fill="#64748b"/>
+<text x="442.0" y="539.0" font-size="11.5" fill="#334155" >concept graph, ask your map; spend and runs</text>
+<rect x="420.0" y="563.0" width="380.0" height="62.5" rx="9" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+<text x="432.0" y="588.0" font-size="13" font-weight="600" fill="#7f1d1d" >Capabilities (admin)</text>
+<circle cx="435.0" cy="605.5" r="1.8" fill="#64748b"/>
+<text x="442.0" y="609.5" font-size="11.5" fill="#334155" >skills, corrections, audit, Qdrant rebuild</text>
+<rect x="880.0" y="110.0" width="400.0" height="128.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="892.0" y="136.0" font-size="14" font-weight="600" fill="#7c3d0c" >temporal (:7233, UI :8233)</text>
+<circle cx="895.0" cy="154.0" r="1.8" fill="#64748b"/>
+<text x="902.0" y="158.0" font-size="12" fill="#334155" >BuildVideoWorkflow · EditProjectWorkflow</text>
+<circle cx="895.0" cy="170.0" r="1.8" fill="#64748b"/>
+<text x="902.0" y="174.0" font-size="12" fill="#334155" >LocalizeProjectWorkflow</text>
+<circle cx="895.0" cy="186.0" r="1.8" fill="#64748b"/>
+<text x="902.0" y="190.0" font-size="12" fill="#334155" >QdrantReconciliationWorkflow (hourly)</text>
+<circle cx="895.0" cy="202.0" r="1.8" fill="#64748b"/>
+<text x="902.0" y="206.0" font-size="12" fill="#334155" >durable, cancellable; a failed rebuild restores the last</text>
+<text x="902.0" y="222.0" font-size="12" fill="#334155" >good video</text>
+<rect x="894.0" y="308.0" width="372.0" height="93.5" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<text x="906.0" y="333.0" font-size="13" font-weight="600" fill="#7c3d0c" >Lesson pipeline</text>
+<circle cx="909.0" cy="350.5" r="1.8" fill="#64748b"/>
+<text x="916.0" y="354.5" font-size="11.5" fill="#334155" >prepare → collect → curate → script → storyboard →</text>
+<text x="916.0" y="370.0" font-size="11.5" fill="#334155" >narration → scenes ∥ → review → assemble (lesson-</text>
+<text x="916.0" y="385.5" font-size="11.5" fill="#334155" >pipeline.svg)</text>
+<rect x="894.0" y="409.5" width="372.0" height="78.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<rect x="1212.5" y="417.5" width="45.5" height="18" rx="9" fill="#e2e8f0"/><text x="1235.2" y="430.5" font-size="10.5" font-weight="600" fill="#334155" text-anchor="middle">local</text>
+<text x="906.0" y="434.5" font-size="13" font-weight="600" fill="#7c3d0c" >Manim sandbox</text>
+<circle cx="909.0" cy="452.0" r="1.8" fill="#64748b"/>
+<text x="916.0" y="456.0" font-size="11.5" fill="#334155" >AST allow-list, resource limits; LaTeX and Noto fonts</text>
+<text x="916.0" y="471.5" font-size="11.5" fill="#334155" >for Indic scripts</text>
+<rect x="894.0" y="495.5" width="372.0" height="62.5" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
+<rect x="1212.5" y="503.5" width="45.5" height="18" rx="9" fill="#e2e8f0"/><text x="1235.2" y="516.5" font-size="10.5" font-weight="600" fill="#334155" text-anchor="middle">local</text>
+<text x="906.0" y="520.5" font-size="13" font-weight="600" fill="#7c3d0c" >Media</text>
+<circle cx="909.0" cy="538.0" r="1.8" fill="#64748b"/>
+<text x="916.0" y="542.0" font-size="11.5" fill="#334155" >FFmpeg, MMS forced alignment (CPU), subtitles</text>
+<rect x="1360.0" y="110.0" width="420.0" height="128.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+<text x="1372.0" y="136.0" font-size="14" font-weight="600" fill="#1e3a8a" >postgres: the source of truth</text>
+<circle cx="1375.0" cy="154.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="158.0" font-size="12" fill="#334155" >accounts, research settings, chats, messages, chat summaries</text>
+<circle cx="1375.0" cy="170.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="174.0" font-size="12" fill="#334155" >projects, videos, scenes and every versioned artifact record</text>
+<circle cx="1375.0" cy="186.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="190.0" font-size="12" fill="#334155" >sources and chunks, verification runs and issues</text>
+<circle cx="1375.0" cy="202.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="206.0" font-size="12" fill="#334155" >corrections, skills, audit, usage events, concept graph,</text>
+<text x="1382.0" y="222.0" font-size="12" fill="#334155" >catalog, study data</text>
+<rect x="1360.0" y="252.0" width="420.0" height="80.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+<text x="1372.0" y="278.0" font-size="14" font-weight="600" fill="#1e3a8a" >qdrant: rebuildable vectors</text>
+<circle cx="1375.0" cy="296.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="300.0" font-size="12" fill="#334155" >source chunks (chat + library), skills, knowledge concepts</text>
+<circle cx="1375.0" cy="312.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="316.0" font-size="12" fill="#334155" >filtered per chat; rebuilt from Postgres when they drift</text>
+<rect x="1360.0" y="346.0" width="420.0" height="96.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
+<text x="1372.0" y="372.0" font-size="14" font-weight="600" fill="#1e3a8a" >artifact store (./projects)</text>
+<circle cx="1375.0" cy="390.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="394.0" font-size="12" fill="#334155" >per chat and scene, versioned: plan, script, storyboard,</text>
+<text x="1382.0" y="410.0" font-size="12" fill="#334155" >audio, code, renders, reports</text>
+<circle cx="1375.0" cy="422.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="426.0" font-size="12" fill="#334155" >final MP4, SRT/VTT, timeline</text>
+<rect x="1360.0" y="456.0" width="420.0" height="64.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="1372.0" y="482.0" font-size="14" font-weight="600" fill="#334155" >migrate (one-shot)</text>
+<circle cx="1375.0" cy="500.0" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="504.0" font-size="12" fill="#334155" >Alembic migrations before api and worker start</text>
+<rect x="54.0" y="719.5" width="410.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="66.0" y="745.5" font-size="14" font-weight="600" fill="#0f172a" >OpenRouter (or any OpenAI-compatible API)</text>
+<circle cx="69.0" cy="763.5" r="1.8" fill="#64748b"/>
+<text x="76.0" y="767.5" font-size="12" fill="#334155" >main LLM, planner, code, vision, video review, translation</text>
+<circle cx="69.0" cy="779.5" r="1.8" fill="#64748b"/>
+<text x="76.0" y="783.5" font-size="12" fill="#334155" >web search for research</text>
+<rect x="484.0" y="719.5" width="300.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="496.0" y="745.5" font-size="14" font-weight="600" fill="#0f172a" >Gemini / Anthropic SDKs</text>
+<circle cx="499.0" cy="763.5" r="1.8" fill="#64748b"/>
+<text x="506.0" y="767.5" font-size="12" fill="#334155" >direct providers for LLM, TTS and STT</text>
+<text x="506.0" y="783.5" font-size="12" fill="#334155" >where configured</text>
+<rect x="804.0" y="719.5" width="280.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<text x="816.0" y="745.5" font-size="14" font-weight="600" fill="#0f172a" >Bodhan</text>
+<circle cx="819.0" cy="763.5" r="1.8" fill="#64748b"/>
+<text x="826.0" y="767.5" font-size="12" fill="#334155" >translation and speech for Indian</text>
+<text x="826.0" y="783.5" font-size="12" fill="#334155" >languages</text>
+<rect x="1104.0" y="719.5" width="320.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<rect x="1370.5" y="727.5" width="45.5" height="18" rx="9" fill="#e2e8f0"/><text x="1393.2" y="740.5" font-size="10.5" font-weight="600" fill="#334155" text-anchor="middle">local</text>
+<text x="1116.0" y="745.5" font-size="14" font-weight="600" fill="#0f172a" >kokoro (optional, :8811)</text>
+<circle cx="1119.0" cy="763.5" r="1.8" fill="#64748b"/>
+<text x="1126.0" y="767.5" font-size="12" fill="#334155" >Kokoro-82M English TTS on CPU; compose</text>
+<text x="1126.0" y="783.5" font-size="12" fill="#334155" >profile &#x27;kokoro&#x27;, used for $0 QA</text>
+<rect x="1444.0" y="719.5" width="330.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+<rect x="1720.5" y="727.5" width="45.5" height="18" rx="9" fill="#e2e8f0"/><text x="1743.2" y="740.5" font-size="10.5" font-weight="600" fill="#334155" text-anchor="middle">local</text>
+<text x="1456.0" y="745.5" font-size="14" font-weight="600" fill="#0f172a" >Local models in the image</text>
+<circle cx="1459.0" cy="763.5" r="1.8" fill="#64748b"/>
+<text x="1466.0" y="767.5" font-size="12" fill="#334155" >sentence-transformer embeddings, MMS aligner,</text>
+<text x="1466.0" y="783.5" font-size="12" fill="#334155" >uroman</text>
+<rect x="40.0" y="855.5" width="420.0" height="64.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="52.0" y="881.5" font-size="14" font-weight="600" fill="#334155" >lesson-pipeline.svg</text>
+<circle cx="55.0" cy="899.5" r="1.8" fill="#64748b"/>
+<text x="62.0" y="903.5" font-size="12" fill="#334155" >one video build, stage by stage</text>
+<rect x="480.0" y="855.5" width="420.0" height="64.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="492.0" y="881.5" font-size="14" font-weight="600" fill="#334155" >scene-production.svg</text>
+<circle cx="495.0" cy="899.5" r="1.8" fill="#64748b"/>
+<text x="502.0" y="903.5" font-size="12" fill="#334155" >one scene: code, render, verify, repair</text>
+<rect x="920.0" y="855.5" width="420.0" height="64.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="932.0" y="881.5" font-size="14" font-weight="600" fill="#334155" >learning-loop.svg</text>
+<circle cx="935.0" cy="899.5" r="1.8" fill="#64748b"/>
+<text x="942.0" y="903.5" font-size="12" fill="#334155" >correction memory and agent skills</text>
+<rect x="1360.0" y="855.5" width="420.0" height="64.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="1372.0" y="881.5" font-size="14" font-weight="600" fill="#334155" >chat-and-edits.svg</text>
+<circle cx="1375.0" cy="899.5" r="1.8" fill="#64748b"/>
+<text x="1382.0" y="903.5" font-size="12" fill="#334155" >chat routing, background work, edits</text>
+<path d="M190.0,238.0 L190.0,298.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="170.2" y="259.0" width="39.5" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="190.0" y="272.0" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">HTTPS</text>
+<path d="M340.0,354.0 L373.0,354.0 L373.0,375.8 L406.0,375.8" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<path d="M814.0,285.8 L847.0,285.8 L847.0,174.0 L880.0,174.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="800.7" y="220.9" width="92.6" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="847.0" y="233.9" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">start workflow</text>
+<path d="M1080.0,238.0 L1080.0,280.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="1045.5" y="250.0" width="69.0" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="1080.0" y="263.0" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">activities</text>
+<path d="M754.0,112.0 L754.0,92.0 L1325.0,92.0 L1325.0,136.0 L1360.0,136.0" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-muted)"/>
+<rect x="884.9" y="83.0" width="80.8" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="925.3" y="96.0" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">read / write</text>
+<path d="M1280.0,386.0 L1320.0,386.0 L1320.0,214.0 L1360.0,214.0" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-muted)"/>
+<path d="M1280.0,426.0 L1320.0,426.0 L1320.0,394.0 L1360.0,394.0" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-muted)"/>
+<path d="M1080.0,572.0 L1080.0,631.8 L914.0,631.8 L914.0,691.5" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="959.5" y="622.8" width="74.9" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="997.0" y="635.8" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">model calls</text>
+<path d="M610.0,639.5 L610.0,665.5 L914.0,665.5 L914.0,691.5" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+<rect x="689.1" y="656.5" width="145.7" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="762.0" y="669.5" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">chat, titles, summaries</text>
+<path d="M406.0,575.8 L373.0,575.8 L373.0,384.0 L340.0,384.0" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arrow-muted)"/>
+<rect x="332.6" y="470.9" width="80.8" height="18.0" rx="4" fill="#ffffff" fill-opacity="0.95"/>
+<text x="373.0" y="483.9" font-size="11" fill="#475569" text-anchor="middle" font-style="italic">video stream</text>
+<text x="40.0" y="839.5" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">Detailed diagrams</text>
 </svg>
