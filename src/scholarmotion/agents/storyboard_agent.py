@@ -70,12 +70,22 @@ STORYBOARD_BATCH = 8
 
 
 async def _plan_batch(
-    provider, blocks: list[NarrationBlock], *, earlier: list[NarrationBlock]
+    provider,
+    blocks: list[NarrationBlock],
+    *,
+    earlier: list[NarrationBlock],
+    section_notes: dict[str, str],
+    looked_up: str,
 ) -> dict[str, SceneVisualPlan]:
     lesson_outline = "\n\n".join(
         f"SCENE {block.block_id}\nLearning objective: {block.learning_objective}\n"
         f"Equations: {block.equations or '(none)'}\nSource IDs: {block.source_ids or '(none)'}\n"
-        f"{_plot_lines(block)}"
+        + (
+            f"Lesson plan for this part: {section_notes[block.chapter_id]}\n"
+            if block.chapter_id in section_notes
+            else ""
+        )
+        + f"{_plot_lines(block)}"
         f"Audio/subtitle narration for alignment only (never copy to screen): {block.text}"
         for block in blocks
     )
@@ -104,7 +114,14 @@ async def _plan_batch(
         "Every beat must quote the corresponding phrase from its narration in narration_segment, "
         "in spoken order. Align each object change with that phrase. "
         "Include every supplied block_id exactly once.\n\n"
-        f"{lesson_outline}\n\nReturn the scenes list."
+        + (
+            "The lesson plan's visual ideas are suggestions from the curator who read the "
+            "material: use them where they fit the narration. "
+            if section_notes
+            else ""
+        )
+        + (f"\n\nPASSAGES YOU LOOKED UP:\n{looked_up}" if looked_up else "")
+        + f"\n\n{lesson_outline}\n\nReturn the scenes list."
     )
     try:
         raw = await provider.generate_text(prompt, reasoning_effort="high")
@@ -116,15 +133,33 @@ async def _plan_batch(
         return {}
 
 
-async def plan_storyboard(provider, blocks: list[NarrationBlock]) -> dict[str, list[VisualBeat]]:
-    """Plan specific, pedagogical visual beats, with a deterministic safe fallback."""
+async def plan_storyboard(
+    provider,
+    blocks: list[NarrationBlock],
+    *,
+    section_notes: dict[str, str] | None = None,
+    looked_up: str = "",
+) -> dict[str, list[VisualBeat]]:
+    """Plan specific, pedagogical visual beats, with a deterministic safe fallback.
+
+    ``section_notes`` maps a chapter id to its part of the curator's plan (key points
+    and visual ideas); ``looked_up`` holds passages the planner asked for.
+    """
     plans: dict[str, SceneVisualPlan] = {}
     if getattr(provider, "name", "") != "mock" and hasattr(provider, "generate_text"):
         # Long lectures are planned in batches; each batch sees the titles of
         # the scenes before it so visuals keep building instead of repeating.
         for offset in range(0, len(blocks), STORYBOARD_BATCH):
             batch = blocks[offset : offset + STORYBOARD_BATCH]
-            plans.update(await _plan_batch(provider, batch, earlier=blocks[:offset]))
+            plans.update(
+                await _plan_batch(
+                    provider,
+                    batch,
+                    earlier=blocks[:offset],
+                    section_notes=section_notes or {},
+                    looked_up=looked_up,
+                )
+            )
 
     result: dict[str, list[VisualBeat]] = {}
     for block in blocks:

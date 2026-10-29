@@ -267,6 +267,7 @@ def _create_llm(
             reasoning_effort=reasoning_effort,
             structured_reasoning_effort=structured_reasoning_effort,
             default_temperature=settings.agent_temperature,
+            request_timeout_seconds=settings.llm_request_timeout_seconds,
         )
     raise ValueError(f"unknown LLM provider: {name}")
 

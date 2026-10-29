@@ -33,6 +33,18 @@ class QdrantConfig:
         )
 
 
+def _any_of(models, key: str, values: list):
+    """Match any listed value; None also matches a missing or null field."""
+    present = [value for value in values if value is not None]
+    options = (
+        [models.FieldCondition(key=key, match=models.MatchAny(any=present))] if present else []
+    )
+    if None in values:
+        options.append(models.IsNullCondition(is_null=models.PayloadField(key=key)))
+        options.append(models.IsEmptyCondition(is_empty=models.PayloadField(key=key)))
+    return models.Filter(should=options)
+
+
 class QdrantVectorStore:
     def __init__(self, config: QdrantConfig):
         self.config = config
@@ -181,7 +193,9 @@ class QdrantVectorStore:
 
             client = await self._get_client()
             must = [
-                models.FieldCondition(key=key, match=models.MatchValue(value=value))
+                _any_of(models, key, value)
+                if isinstance(value, list)
+                else models.FieldCondition(key=key, match=models.MatchValue(value=value))
                 for key, value in (filters or {}).items()
                 if value is not None
             ]

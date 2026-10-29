@@ -223,7 +223,7 @@ def curriculum_from_outline(
         )
         for index, chapter in enumerate(outline.chapters)
     ]
-    return CurriculumPlan(topic=outline.title, items=items)
+    return CurriculumPlan(topic=outline.title, items=items, kind="paper")
 
 
 def _chapter_figures(outline: PaperOutline, chapter: PaperChapter) -> list[PaperFigure]:

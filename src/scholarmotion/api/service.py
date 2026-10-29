@@ -22,7 +22,7 @@ from scholarmotion.agents.paper_outline import (
     referenced_figures,
 )
 from scholarmotion.agents.script_writer import revise_narration
-from scholarmotion.api.tutor import is_active
+from scholarmotion.api.tutor import chat_history
 from scholarmotion.config import Settings
 from scholarmotion.editing.dependencies import invalidation_for
 from scholarmotion.manim_runtime.sandbox import SandboxRenderer
@@ -77,6 +77,8 @@ from scholarmotion.providers import (
     create_video_provider,
     create_vision_provider,
 )
+from scholarmotion.retrieval.collection import plan_queries
+from scholarmotion.retrieval.collection import search_web as search_web_for
 from scholarmotion.retrieval.hybrid_retrieval import (
     HybridRetriever,
     RetrievedChunk,
@@ -88,9 +90,10 @@ from scholarmotion.retrieval.project_papers import (
     project_sources,
 )
 from scholarmotion.retrieval.qdrant_retrieval import QdrantHybridRetriever
-from scholarmotion.retrieval.web_research import web_research
 from scholarmotion.schemas import ArtifactKind, PaperFigure, SceneSpec, TimingCue, TTSResult
 from scholarmotion.services import BuildResult, ScholarMotionPipeline
+from scholarmotion.services import research_settings as research
+from scholarmotion.services.chat_memory import recall
 from scholarmotion.services.usage_records import new_run_id, usage_rows
 from scholarmotion.skills import SkillService
 from scholarmotion.translation import TranslationService
@@ -193,35 +196,59 @@ async def retrieve_context(
     project: Project,
     chunk_values: list[dict],
     query: str | None = None,
+    *,
+    queries: list[str] | None = None,
+    limit: int = 20,
 ) -> list[RetrievedChunk]:
-    """Query Qdrant, then hydrate authoritative source records from PostgreSQL."""
-    query = query or project.request
+    """Query Qdrant with every query at once, then hydrate records from PostgreSQL."""
+    queries = queries or [query or project.request]
     try:
         return await QdrantHybridRetriever(
             embeddings, QdrantVectorStore(QdrantConfig.from_settings(settings))
-        ).search(session, query, project_id=str(project.id), limit=20)
+        ).search_many(session, queries, project_id=str(project.id), limit=limit)
     except QdrantUnavailable as error:
         logger.warning("Qdrant retrieval unavailable, using in-process fallback: %s", error)
     if not chunk_values:
         return []
-    return await HybridRetriever(embeddings).search(query, chunk_values, limit=20)
+    return await _search_in_memory(embeddings, chunk_values, queries, limit)
+
+
+async def _search_in_memory(
+    embeddings, chunks: list[dict], queries: list[str], limit: int
+) -> list[RetrievedChunk]:
+    """Each query over the chunks; a passage keeps its best score across the queries."""
+    best: dict[str, RetrievedChunk] = {}
+    for query in queries:
+        for item in await HybridRetriever(embeddings).search(query, chunks, limit=limit):
+            key = str(item.chunk.get("id"))
+            if key not in best or item.score > best[key].score:
+                best[key] = item
+    return sorted(best.values(), key=lambda item: item.score, reverse=True)
 
 
 GIVEN_SOURCE_FULL_READ_CHUNKS = 60
 
 
-async def given_source_chunks(embeddings, chunks: list[dict], query: str) -> list[dict]:
+async def given_source_chunks(
+    embeddings,
+    chunks: list[dict],
+    query: str,
+    *,
+    queries: list[str] | None = None,
+    full_read_chunks: int = GIVEN_SOURCE_FULL_READ_CHUNKS,
+    limit: int = 40,
+) -> list[dict]:
     """The learner's own sources for a lesson, in reading order.
 
     A short source (a blog post, an article) is used whole, so the lesson can
     follow its argument; a long one contributes its passages most relevant to
-    the request, still in the order they appear.
+    the request (best passages per query), still in the order they appear.
     """
-    if len(chunks) <= GIVEN_SOURCE_FULL_READ_CHUNKS:
+    if len(chunks) <= full_read_chunks:
         return list(chunks)
     position = {chunk["id"]: index for index, chunk in enumerate(chunks)}
-    found = await HybridRetriever(embeddings).search(query, chunks, limit=40)
-    selected = [{**item.chunk, "score": item.score} for item in found]
+    found = await _search_in_memory(embeddings, chunks, queries or [query], limit)
+    selected = [{**item.chunk, "score": item.score} for item in found[: limit * 2]]
     return sorted(selected, key=lambda chunk: position.get(chunk["id"], 0))
 
 
@@ -707,18 +734,12 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                 if workspace
                 else "English"
             )
-            recent_messages = list(
-                (
-                    await session.scalars(
-                        select(TutorMessage)
-                        .where(TutorMessage.project_id == project_id)
-                        .order_by(TutorMessage.created_at.desc())
-                        .limit(48)
-                    )
-                ).all()
+            # Recent turns word for word; older ones through the running summary.
+            earlier_turns, recent_messages = recall(
+                project,
+                await chat_history(session, project_id),
+                research.resolve(account.research_settings if account else None).chat_turns_kept,
             )
-            recent_messages = [m for m in recent_messages if is_active(m)][:16]
-            recent_messages.reverse()
             latest_user = next(
                 (message for message in reversed(recent_messages) if message.role == "user"), None
             )
@@ -731,6 +752,10 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                 f"{message.role.upper()}: {message.display_text}\nCANONICAL: {message.canonical_text}"
                 for message in recent_messages
             )
+            if earlier_turns:
+                preparation_conversation = (
+                    f"{earlier_turns}\nRECENT TURNS:\n{preparation_conversation}"
+                )
             cached_preparation = (
                 (latest_user.metadata_json or {}).get("lesson_preparation")
                 if latest_user is not None
@@ -766,6 +791,19 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
             runtime.text_language = preparation.text_language
             runtime.voice_language = preparation.voice_language
             scope = preparation.source_scope
+            depth = research.resolve(account.research_settings if account else None)
+            runtime.research = depth
+            search_web = (
+                settings.web_search_enabled
+                and preparation.lesson_scope != "whole_paper"
+                and scope != "only_given"
+            )
+            queries = await plan_queries(
+                getattr(runtime, "planner_llm", None) or runtime.llm,
+                project.request,
+                preparation.retrieval_query or project.request,
+                max(depth.search_queries, depth.web_searches if search_web else 1),
+            )
             # A whole-paper lecture reads its one paper end to end instead of
             # retrieving the top matches across sources.
             lecture_paper = (
@@ -790,6 +828,9 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     runtime.embeddings,
                     [chunk for chunk in chunk_values if chunk["document_id"] in given_ids],
                     preparation.retrieval_query or project.request,
+                    queries=queries[: depth.search_queries],
+                    full_read_chunks=depth.full_read_chunks,
+                    limit=depth.library_top_k,
                 )
                 if not retrieved_chunks:
                     raise RuntimeError(
@@ -804,15 +845,13 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     project,
                     chunk_values,
                     query=preparation.retrieval_query or project.request,
+                    queries=queries[: depth.search_queries],
+                    limit=depth.library_top_k,
                 )
                 retrieved_chunks = [{**item.chunk, "score": item.score} for item in retrieved]
-            # The web is searched only where the learner allowed it: as a
-            # supplement to their sources, or when nothing saved matched.
-            search_web = (
-                settings.web_search_enabled
-                and lecture_paper is None
-                and (scope == "given_plus_web" or (scope != "only_given" and not retrieved_chunks))
-            )
+            # The web is searched alongside the library wherever the learner
+            # allowed outside material; never for "only my sources" or a paper.
+            search_web = search_web and lecture_paper is None
             if search_web:
                 await record_event(
                     session,
@@ -821,15 +860,17 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     detail={
                         "reason": "Adding outside web sources to your sources, as you allowed."
                         if scope == "given_plus_web"
-                        else "No saved or library source matched; searching the web."
+                        else "Searching the web alongside the library.",
+                        "searches": min(depth.web_searches, len(queries)),
                     },
                 )
                 await session.commit()
-                retrieved_chunks = retrieved_chunks + await web_research(
+                retrieved_chunks = retrieved_chunks + await search_web_for(
                     runtime.llm,
-                    preparation.retrieval_query or project.request,
+                    queries[: depth.web_searches],
+                    results_per_search=depth.web_results,
+                    pages_to_read=depth.web_pages_read,
                     reasoning_effort=settings.tutor_reasoning_effort,
-                    max_results=settings.web_search_max_results,
                 )
             source_labels = list(
                 dict.fromkeys(

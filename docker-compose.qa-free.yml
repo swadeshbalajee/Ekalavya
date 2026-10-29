@@ -1,0 +1,32 @@
+# QA with free models only: every model call goes to a free OpenRouter model and
+# narration to the local Kokoro service, so a full English build costs nothing.
+#   docker compose --profile kokoro up -d kokoro
+#   docker compose -f docker-compose.yml -f docker-compose.qa-free.yml up -d api worker
+# Back to the normal models:  docker compose up -d api worker
+# Free models are slow and change often; web search stays off because OpenRouter
+# charges for web results even with free models. English only (Kokoro's English voice).
+x-free-models: &free-models
+  MAIN_LLM_MODEL: nvidia/nemotron-3.5-super-vl:free
+  MAIN_LLM_FALLBACK_MODELS: dots-studio/dots-3-note-preview:free
+  PLANNER_LLM_MODEL: nvidia/nemotron-3.5-super-vl:free
+  PLANNER_LLM_FALLBACK_MODELS: dots-studio/dots-3-note-preview:free
+  TRANSLATION_MODEL: nvidia/nemotron-3.5-super-vl:free
+  CODE_MODEL: poolside/laguna-s-2.1:free
+  CODE_FALLBACK_MODELS: cohere/north-mini-code:free
+  CODE_GENERATION_TIMEOUT_SECONDS: "600"
+  VISUAL_LLM_MODEL: nvidia/nemotron-3.5-super-vl:free
+  VISUAL_LLM_FALLBACK_MODELS: dots-studio/dots-3-note-preview:free
+  # No free model reviews video; frames are still checked by the vision model.
+  VIDEO_VERIFICATION_ENABLED: "false"
+  STT_PROVIDER: mock
+  WEB_SEARCH_ENABLED: "false"
+  LLM_REQUEST_TIMEOUT_SECONDS: "900"
+  TTS_PROVIDER: kokoro_http
+  TTS_BASE_URL: http://kokoro:8811
+  TTS_VOICE: af_heart
+
+services:
+  api:
+    environment: *free-models
+  worker:
+    environment: *free-models

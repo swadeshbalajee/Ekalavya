@@ -37,7 +37,7 @@ RETRY_EVENTS = {"scene.rejected", "scene.timing_repaired", "scene.review_repair"
 PIPELINE = (
     ("prepare", "Prepare", {"project.started", "preparation.started"}, {"preparation.complete"}),
     ("sources", "Sources", {"retrieval.web_started"}, {"retrieval.complete"}),
-    ("plan", "Lesson plan", set(), {"curriculum.complete"}),
+    ("plan", "Lesson plan", {"curation.started"}, {"curriculum.complete"}),
     ("script", "Script + review", {"script.review"}, {"script.complete"}),
     ("storyboard", "Storyboard", set(), {"storyboard.complete", "scenes.created"}),
     ("narration", "Narration", set(), set()),

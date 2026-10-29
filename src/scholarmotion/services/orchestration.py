@@ -23,6 +23,7 @@ from scholarmotion.agents.code_generator import (
 from scholarmotion.agents.curriculum_agent import build_curriculum
 from scholarmotion.agents.knowledge_gatherer import gather_knowledge
 from scholarmotion.agents.learner_profiler import profile_request
+from scholarmotion.agents.lesson_curator import LessonCurator, plan_evidence
 from scholarmotion.agents.lesson_preparation import LessonPreparation
 from scholarmotion.agents.manager import Manager, RepairAction
 from scholarmotion.agents.paper_outline import (
@@ -31,6 +32,7 @@ from scholarmotion.agents.paper_outline import (
     outline_evidence,
 )
 from scholarmotion.agents.pedagogical_agent import build_teaching_dossier
+from scholarmotion.agents.reference_lookup import look_up
 from scholarmotion.agents.scene_compiler import compile_scene_specs
 from scholarmotion.agents.script_writer import SOURCE_POLICIES, revise_narration, write_script
 from scholarmotion.agents.storyboard_agent import plan_storyboard
@@ -47,7 +49,9 @@ from scholarmotion.media.timeline import build_timeline, media_duration
 from scholarmotion.memory.correction_memory import CorrectionMemory
 from scholarmotion.observability.usage import set_usage_scene, usage_stage
 from scholarmotion.persistence.storage import LocalObjectStore
+from scholarmotion.retrieval.hybrid_retrieval import HybridRetriever
 from scholarmotion.schemas import (
+    CurriculumPlan,
     NarrationBlock,
     SceneSpec,
     Timeline,
@@ -57,6 +61,7 @@ from scholarmotion.schemas import (
     VerificationReport,
     VisualBeat,
 )
+from scholarmotion.services.research_settings import ResearchSettings
 from scholarmotion.skills import SkillService
 from scholarmotion.translation import TranslationService
 
@@ -487,10 +492,67 @@ class ScholarMotionPipeline:
         # Per-scene tracks cut from one continuous lesson narration.
         self._lesson_audio: dict[str, TTSResult] = {}
         self._presentation_cache: dict[tuple, tuple[SceneSpec, str]] = {}
+        # The learner's research depth; the API sets it per build.
+        self.research = ResearchSettings()
 
     def _planner(self):
         # Test pipelines built with object.__new__ have no planner attribute.
         return getattr(self, "planner_llm", None) or self.llm
+
+    def _depth(self) -> ResearchSettings:
+        return getattr(self, "research", None) or ResearchSettings()
+
+    async def _curated_curriculum(
+        self,
+        project_id: str,
+        video_version: int,
+        request: str,
+        profile,
+        collected: list[dict],
+        resume: bool,
+    ) -> CurriculumPlan | None:
+        """The curator's plan for this lesson; a resumed build reuses the saved one."""
+        if resume:
+            saved = self._read_json(f"{project_id}/artifacts/curriculum/v{video_version}.json")
+            if saved and saved.get("kind") == "curated":
+                return CurriculumPlan.model_validate(saved)
+        await self._notify_progress("curation.started", detail={"passages": len(collected)})
+        return await LessonCurator(self.llm, helper=self._planner()).curate(
+            request=request,
+            chunks=collected,
+            minutes=profile.desired_duration_minutes,
+            level=profile.target_level,
+            source_scope=getattr(self, "_source_scope", "none"),
+            one_pass_chars=self._depth().one_pass_chars,
+        )
+
+    def _reference_lookup(self, curriculum: CurriculumPlan, collected: list[dict]):
+        """``lookup(task, plan)`` for the writers, over everything collected for this lesson."""
+        limit = self._depth().reference_lookups
+        if curriculum.kind != "curated" or limit <= 0:
+            return None
+        chunks_by_id = {str(chunk.get("id")): chunk for chunk in collected}
+        embeddings = getattr(self, "embeddings", None)
+
+        async def search(query: str) -> list[dict]:
+            if embeddings is None or not collected:
+                return []
+            found = await HybridRetriever(embeddings).search(query, collected, limit=3)
+            return [item.chunk for item in found]
+
+        async def lookup(task: str, plan: str) -> str:
+            return await look_up(
+                self._planner(),
+                task=task,
+                plan=plan,
+                references=curriculum.references,
+                chunks_by_id=chunks_by_id,
+                search=search,
+                max_lookups=limit,
+                stage="reference_lookup",
+            )
+
+        return lookup
 
     async def _notify_progress(
         self, event: str, scene_id: str | None = None, detail: dict | None = None
@@ -712,22 +774,35 @@ class ScholarMotionPipeline:
         )
         events.append("retrieval.complete")
         await self._notify_progress("retrieval.complete")
-        curriculum = (
-            curriculum_from_outline(
+        collected = list(retrieved_chunks or [])
+        if paper_outline is not None:
+            curriculum = curriculum_from_outline(
                 paper_outline,
                 minutes=duration_minutes,
                 source_ids=[source for card in cards for source in card.source_ids],
             )
-            if paper_outline is not None
-            else build_curriculum(profile, cards)
-        )
+        else:
+            curriculum = await self._curated_curriculum(
+                project_id, video_version, request, profile, collected, resume
+            ) or build_curriculum(profile, cards)
         self._json(f"{project_id}/artifacts/curriculum/v{video_version}.json", curriculum)
         events.append("curriculum.complete")
-        await self._notify_progress("curriculum.complete")
+        await self._notify_progress(
+            "curriculum.complete",
+            detail={
+                "plan": curriculum.kind,
+                "sections": len(curriculum.items),
+                "references": len(curriculum.references),
+            },
+        )
         dossier = build_teaching_dossier(profile, curriculum, cards)
         if paper_outline is not None:
             # The outline is compact, structured grounding for the whole paper.
             dossier["evidence"] = outline_evidence(paper_outline)
+        elif curriculum.kind == "curated":
+            # Later stages work from the curator's plan, not the raw material.
+            dossier["evidence"] = plan_evidence(curriculum)
+        lookup = self._reference_lookup(curriculum, collected)
         self._json(f"{project_id}/artifacts/pedagogy/v{video_version}.json", dossier)
         saved_script = (
             self._read_json(f"{project_id}/artifacts/script/v{video_version}.json")
@@ -751,6 +826,7 @@ class ScholarMotionPipeline:
                     learner_level=profile.target_level,
                     review_callback=self._report_script_review,
                     source_scope=self._source_scope,
+                    lookup=lookup,
                 )
         if dossier.get("script_review"):
             self._json(
@@ -783,8 +859,25 @@ class ScholarMotionPipeline:
                 for key, beats in saved_storyboard.items()
             }
         else:
+            section_notes = {
+                f"C{index:02d}": "; ".join(
+                    [*item.key_points, *(f"show: {idea}" for idea in item.visual_ideas)]
+                )
+                for index, item in enumerate(curriculum.items, 1)
+                if curriculum.kind == "curated" and (item.key_points or item.visual_ideas)
+            }
+            looked_up = (
+                await lookup(
+                    "plan the visuals for this lesson",
+                    "\n".join(f"{key}: {notes}" for key, notes in section_notes.items()),
+                )
+                if section_notes
+                else ""
+            )
             with usage_stage("storyboard"):
-                storyboard = await plan_storyboard(self._planner(), blocks)
+                storyboard = await plan_storyboard(
+                    self._planner(), blocks, section_notes=section_notes, looked_up=looked_up
+                )
         self._json(
             f"{project_id}/artifacts/storyboard/v{video_version}.json",
             {key: [beat.model_dump() for beat in beats] for key, beats in storyboard.items()},

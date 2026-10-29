@@ -14,7 +14,8 @@ const LABELS: Record<string, string> = {
   "retrieval.complete": "Source material is ready",
   "paper.reading": "Reading the whole paper",
   "paper.outlined": "Lecture plan for the paper is ready",
-  "curriculum.complete": "Lesson outline is ready",
+  "curation.started": "Reading the material and writing the lesson plan",
+  "curriculum.complete": "Lesson plan is ready",
   "script.complete": "Narration is ready",
   "storyboard.complete": "Scenes are planned",
   "scenes.created": "Building the planned scenes",
@@ -52,6 +53,7 @@ const MILESTONES: Record<string, number> = {
   "preparation.started": 0.04,
   "preparation.complete": 0.1,
   "retrieval.complete": 0.12,
+  "curation.started": 0.14,
   "curriculum.complete": 0.22,
   "script.complete": 0.32,
   "storyboard.complete": 0.4,
@@ -102,7 +104,17 @@ export function describe(event: ProgressEvent): string | null {
     case "paper.outlined":
       return `Planned a ${detail.minutes ?? "?"}-minute lecture on '${detail.title || "the paper"}': ${(detail.chapters || []).length} chapters, ${detail.equations || 0} equations`;
     case "retrieval.web_started":
-      return detail.reason || "Searching the web for reliable sources";
+      return (
+        (detail.reason || "Searching the web for reliable sources") +
+        (detail.searches > 1 ? ` (${detail.searches} searches in parallel)` : "")
+      );
+    case "curation.started":
+      return `Reading ${detail.passages ?? "the"} collected passages and writing the lesson plan`;
+    case "curriculum.complete":
+      return detail.plan === "curated"
+        ? `Lesson plan ready: ${detail.sections} sections` +
+            (detail.references ? `, ${detail.references} references kept for lookup` : "")
+        : "Lesson outline is ready";
     case "script.complete":
       return `Script written for ${detail.segments ?? "?"} scenes and reviewed for ${(detail.checks || ["coherence"]).join(", ")}${detail.revisions ? ` after ${detail.revisions} revision(s)` : ""}`;
     case "script.review": {

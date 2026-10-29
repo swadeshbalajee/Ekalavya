@@ -137,11 +137,11 @@ async def test_a_video_from_a_given_source_asks_before_adding_outside_material(
 ):
     project = await _new_chat(session)
 
-    async def read(_session, _settings, _store, _project_id, url):
-        assert url == BLOG
-        return SimpleNamespace(title="Consciousness in AI models?")
+    async def read(_session, _settings, _store, _project_id, urls):
+        assert urls == [BLOG]
+        return [SimpleNamespace(title="Consciousness in AI models?")]
 
-    monkeypatch.setattr(tutor_api, "ingest_link", read)
+    monkeypatch.setattr(tutor_api, "ingest_links", read)
     decision = await _respond(
         monkeypatch,
         session,
@@ -180,7 +180,7 @@ async def test_an_unreadable_link_is_reported_not_replaced(monkeypatch, session)
     async def unreadable(*_args):
         raise LinkUnreadable(BLOG, "the page needs a login or subscription")
 
-    monkeypatch.setattr(tutor_api, "ingest_link", unreadable)
+    monkeypatch.setattr(tutor_api, "ingest_links", unreadable)
     decision = await _respond(
         monkeypatch,
         session,

@@ -37,7 +37,7 @@ def test_upgrade_head_on_empty_or_orm_initialized_database(tmp_path, preexisting
         )
         assert result.returncode == 0, result.stdout + result.stderr
     with sqlite3.connect(db_path) as connection:
-        assert connection.execute("select version_num from alembic_version").fetchone() == ("0011",)
+        assert connection.execute("select version_num from alembic_version").fetchone() == ("0012",)
         columns = {row[1] for row in connection.execute("pragma table_info(projects)")}
         assert {"pinned", "archived"} <= columns
         assert connection.execute(

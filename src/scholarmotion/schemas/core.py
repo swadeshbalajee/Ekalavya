@@ -140,12 +140,28 @@ class CurriculumItem(BaseModel):
     equations: list[str] = Field(default_factory=list)
     plots: list[DataPlot] = Field(default_factory=list)
     figures: list[PaperFigure] = Field(default_factory=list)
+    # Curated lessons: what is worth showing on screen in this part.
+    visual_ideas: list[str] = Field(default_factory=list)
+
+
+class SourceReference(BaseModel):
+    """Detail the plan left out, kept in the vector store for a later lookup."""
+
+    about: str
+    source_ids: list[str] = Field(default_factory=list)
 
 
 class CurriculumPlan(BaseModel):
     topic: str
     items: list[CurriculumItem]
     skipped_known_concepts: list[str] = Field(default_factory=list)
+    # paper = a paper lecture plan; curated = the lesson curator's plan;
+    # outline = the plain time split used when no model plan is available.
+    kind: str = "outline"
+    # What kind of ask this lesson answers, and how the curator suggests closing it.
+    ask_kind: str = ""
+    ending: str = ""
+    references: list[SourceReference] = Field(default_factory=list)
 
 
 class NarrationBlock(BaseModel):
@@ -446,6 +462,8 @@ class UserAccountUpdate(BaseModel):
     default_duration_minutes: float | None = Field(default=None, gt=0, le=30)
     default_text_language: str | None = None
     default_voice_language: str | None = None
+    # Research depth values by key; out-of-range values are clamped on save.
+    research_settings: dict[str, int] | None = None
 
 
 class ProgressEvent(BaseModel):

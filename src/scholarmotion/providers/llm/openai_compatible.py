@@ -38,6 +38,7 @@ class OpenAICompatibleProvider:
         code_max_output_tokens: int = 6000,
         structured_reasoning_effort: str = "high",
         default_temperature: float = 0.7,
+        request_timeout_seconds: int = 90,
     ):
         try:
             from openai import AsyncOpenAI
@@ -45,7 +46,13 @@ class OpenAICompatibleProvider:
             raise RuntimeError("install scholarmotion[llm] for this provider") from exc
         # Free inference endpoints can stall while shared queues drain. Bound
         # each attempt so the configured fallback models can take over.
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=90, max_retries=0)
+        self.request_timeout_seconds = request_timeout_seconds
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=max(90, request_timeout_seconds, code_timeout_seconds, 420),
+            max_retries=0,
+        )
         self.model = model
         self.openrouter = "openrouter.ai" in str(self.client.base_url).lower()
         self.code_timeout_seconds = code_timeout_seconds
@@ -80,7 +87,8 @@ class OpenAICompatibleProvider:
         for model in [self.model, *self.fallback_models]:
             started = time.perf_counter()
             try:
-                async with asyncio.timeout(timeout_seconds):
+                limit = max(timeout_seconds, getattr(self, "request_timeout_seconds", 90))
+                async with asyncio.timeout(limit):
                     response = await request(model)
                 status = getattr(response, "status", None)
                 if status in {"failed", "incomplete"} or getattr(response, "error", None):

@@ -408,7 +408,8 @@ async def test_the_script_is_written_and_reviewed_as_a_first_person_teacher():
     the reviewer treats third-person narration as a problem and a sign-off as teaching."""
 
     class Planner:
-        prompts: dict = {}
+        def __init__(self):
+            self.prompts: dict = {}
 
         async def generate_structured(self, prompt, schema, **kwargs):
             self.prompts[schema] = prompt

@@ -31,9 +31,11 @@ from scholarmotion.providers import (
     create_translation_provider,
 )
 from scholarmotion.retrieval.project_papers import project_papers, project_sources
-from scholarmotion.retrieval.source_ingestion import LinkUnreadable, ingest_link
+from scholarmotion.retrieval.source_ingestion import LinkUnreadable, ingest_links
 from scholarmotion.retrieval.web_research import format_sources, supports_web_search
 from scholarmotion.schemas import TutorChatRequest
+from scholarmotion.services import research_settings as research
+from scholarmotion.services.chat_memory import conversation_context
 from scholarmotion.translation import TranslationService
 from scholarmotion.verification.answers import answer_problems
 
@@ -187,20 +189,12 @@ async def respond(
     translator = TranslationService(
         create_translation_provider(settings), create_machine_translator(settings)
     )
-    prior_messages = list(
-        (
-            await session.scalars(
-                select(TutorMessage)
-                .where(TutorMessage.project_id == project.id)
-                .order_by(TutorMessage.created_at.desc())
-                .limit(40)
-            )
-        ).all()
-    )
-    prior_messages = [message for message in prior_messages if is_active(message)][:12]
-    prior_messages.reverse()
-    conversation = "\n".join(
-        f"{message.role.upper()}: {message.canonical_text}" for message in prior_messages
+    # Recent turns word for word; older ones through the chat's running summary.
+    owner = await session.get(UserAccount, project.owner_id) if project.owner_id else None
+    conversation, prior_messages = conversation_context(
+        project,
+        await chat_history(session, project.id),
+        research.resolve(owner.research_settings if owner else None).chat_turns_kept,
     )
     # Conversation history is ordered by the learner's most recent turn, not
     # merely by when the lesson was first created.
@@ -248,16 +242,14 @@ async def respond(
     # Links the learner gave are read into the chat's sources before anything
     # uses them. One that cannot be read is reported, never replaced by others.
     read: list[SourceDocument] = []
-    for link in preparation.source_links:
+    if preparation.source_links:
         try:
-            read.append(
-                await ingest_link(
-                    session,
-                    settings,
-                    LocalObjectStore(settings.object_storage_root),
-                    project.id,
-                    link,
-                )
+            read = await ingest_links(
+                session,
+                settings,
+                LocalObjectStore(settings.object_storage_root),
+                project.id,
+                preparation.source_links,
             )
         except LinkUnreadable as error:
             return await _save_assistant(

@@ -83,6 +83,9 @@ class Project(Base, IdMixin):
     catalog_embedding: Mapped[list[float] | None] = mapped_column(JSON)
     # When this chat was last read into its owner's knowledge graph.
     graph_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Older turns, summarised; turns after chat_summary_until are kept word for word.
+    chat_summary: Mapped[str | None] = mapped_column(Text)
+    chat_summary_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
     scenes: Mapped[list[Scene]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
@@ -128,6 +131,8 @@ class UserAccount(Base, IdMixin):
     default_duration_minutes: Mapped[float] = mapped_column(Float, default=3)
     default_text_language: Mapped[str] = mapped_column(String(80), default="English")
     default_voice_language: Mapped[str] = mapped_column(String(80), default="English")
+    # How much material a lesson collects; see services.research_settings.
+    research_settings: Mapped[dict | None] = mapped_column(JSON)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
 

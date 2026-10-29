@@ -4,14 +4,18 @@ import { useAuth } from "../lib/auth";
 import { LANGUAGES } from "../lib/format";
 import { useToast } from "../lib/ui";
 import { Button, Field, Modal, Tabs } from "./common";
+import { ResearchSettings } from "./ResearchSettings";
 
 const COLORS = ["#7C5CFF", "#22D3EE", "#F6B26B", "#22C55E", "#EC4899", "#EF4444", "#64748B"];
 
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, update, logout } = useAuth();
   const toast = useToast();
-  const [tab, setTab] = useState<"account" | "video">("account");
+  const [tab, setTab] = useState<"account" | "video" | "research">("account");
   const [busy, setBusy] = useState(false);
+  const [research, setResearch] = useState<Record<string, number>>(
+    () => user?.research_settings ?? {},
+  );
   const [form, setForm] = useState(() => ({
     display_name: user?.display_name ?? "",
     email: user?.email ?? "",
@@ -26,7 +30,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const save = async () => {
     setBusy(true);
     try {
-      await update({ ...form, email: form.email || null });
+      await update({ ...form, email: form.email || null, research_settings: research });
       toast("Settings saved");
       onClose();
     } catch (error) {
@@ -61,10 +65,13 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         items={[
           { value: "account", label: "Account" },
           { value: "video", label: "Video defaults" },
+          { value: "research", label: "Research depth" },
         ]}
         className="mb-5"
       />
-      {tab === "account" ? (
+      {tab === "research" ? (
+        <ResearchSettings values={research} onChange={setResearch} />
+      ) : tab === "account" ? (
         <div className="space-y-4">
           <Field label="Username">
             <input className="input opacity-70" value={user.username} disabled />

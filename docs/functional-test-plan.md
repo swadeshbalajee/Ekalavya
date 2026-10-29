@@ -1,5 +1,12 @@
 # Ekalavya functional test checklist
 
+## Context-management test — 2026-10-28
+
+Grouped curation and chat compaction keep the core explanation: 10/10 core items in
+both plans and 5/5 in the compacted chat, using free models only ($0). See the
+[report](context-management-test-2026-10-28.md); rerun it with
+`scripts/qa/qa_context_management.py`.
+
 ## Ekalavya-only workspace — 2026-10-25
 
 Unrelated training/benchmark files and six research test cases have been removed

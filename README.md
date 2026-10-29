@@ -24,6 +24,8 @@ Named after Ekalavya, the self-taught archer of the Mahabharata who learned by w
 - **Edit and branch.** Edit any earlier message and resend it. The old turn is kept as a branch you can step through with ‹ ›.
 - **Checked answers.** Worked examples in a reply are recomputed, and every numeric equation must hold. Citations such as `[paper, p. 3]` must point to a retrieved page that contains the cited numbers. A failing reply is regenerated once with the errors named; anything still unverified is stated in a note.
 - **Voice input**, quoted replies, copy, light/dark themes, chats grouped into folders, and temporary (unsaved) chats.
+- **Long chats.** The last turns stay in view word for word; older ones are folded into a running summary in the background (only once they get long), keeping standing preferences, decisions and every video made. Editing a summarised message rebuilds the summary from the new branch.
+- **Research depth** (Settings → *Research depth*): web searches per video (default 3, up to 10), results per search, web pages read in full, library queries and passages, the whole-source and one-pass reading limits, lookups per writing step, and chat turns kept. The page shows the expected extra cost and time per video from your own usage; the server clamps every value to its range.
 
 **Lessons from your own sources**
 - **Your material.** Attach a PDF or paste a link (PDF or web page/blog) in chat.
@@ -106,9 +108,10 @@ More detail is in [docs/system-design.md](docs/system-design.md).
 | Stage | What happens | Code |
 |---|---|---|
 | Prepare | Planner LLM reads the chat: chat vs. video, languages, duration, source links and scope | `agents/lesson_preparation.py`, `api/tutor.py` |
-| Ground | Retrieves from attached PDFs/links (and the web, if allowed) | `retrieval/`, `api/service.py` |
-| Script | Drafts the whole lesson in English, then self-reviews and revises | `agents/script_writer.py` |
-| Storyboard | Plans visual beats per scene to follow the narration | `agents/storyboard_agent.py` |
+| Collect | The planner splits the brief into focused queries; your sources and the library are searched with all of them at once (Qdrant, this chat's and library passages only) and, where outside material is allowed, several web searches run in parallel | `retrieval/collection.py`, `retrieval/qdrant_retrieval.py`, `api/service.py` |
+| Curate | The lesson curator reads everything collected and writes one lesson plan: sections, key points, worked examples with their numbers, the source's wording, visual ideas, and references to detail it left out. A reviewer checks the plan against the material and the curator fixes gaps once. Material larger than the one-pass limit is read in parallel groups, each checked, then merged. Paper lectures use the paper outline instead | `agents/lesson_curator.py`, `agents/paper_outline.py` |
+| Script | Drafts the whole lesson in English from the plan only (looking up referenced passages if it needs them), then self-reviews and revises | `agents/script_writer.py`, `agents/reference_lookup.py` |
+| Storyboard | Plans visual beats per scene from the narration and its part of the plan, with the same lookups | `agents/storyboard_agent.py` |
 | Produce | TTS → forced alignment → Manim code → sandboxed render, scenes in parallel | `services/orchestration.py`, `agents/code_generator.py`, `manim_runtime/` |
 | Verify / repair | Layout, math, pedagogy, raw-TeX and A/V checks; bounded repair loop | `verification/`, `agents/manager.py` |
 | Review | Whole-lesson coherence review; rebuilds ≤3 weak scenes | `services/orchestration.py` |

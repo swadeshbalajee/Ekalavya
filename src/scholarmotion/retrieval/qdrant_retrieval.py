@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from uuid import UUID
+
 from sqlalchemy import select
 
 from scholarmotion.persistence.models import SourceChunk, SourceDocument
@@ -26,29 +29,62 @@ class QdrantHybridRetriever:
         subject: str | None = None,
         limit: int = 20,
     ) -> list[RetrievedChunk]:
-        vector = (await self.embeddings.embed([query]))[0]
-        results = await self.vector_store.query_sources(
-            vector,
-            filters={"class_level": class_level, "subject": subject.lower() if subject else None},
+        return await self.search_many(
+            session,
+            [query],
+            project_id=project_id,
+            class_level=class_level,
+            subject=subject,
             limit=limit,
         )
-        if not results:
+
+    async def search_many(
+        self,
+        session,
+        queries: list[str],
+        *,
+        project_id: str | None = None,
+        class_level: int | None = None,
+        subject: str | None = None,
+        limit: int = 20,
+    ) -> list[RetrievedChunk]:
+        """Several queries at once: one embedding batch, parallel Qdrant searches, one
+        PostgreSQL read. Each passage keeps its best score across the queries.
+
+        Only this chat's sources and the shared library are searched, so other chats'
+        private sources never crowd out the results.
+        """
+        queries = [query for query in dict.fromkeys(q.strip() for q in queries) if query]
+        if not queries:
             return []
-        ids = [item[0] for item in results]
+        vectors = await self.embeddings.embed(queries)
+        filters = {
+            "class_level": class_level,
+            "subject": subject.lower() if subject else None,
+            # Library chunks carry no project id (older ones the text "None").
+            "project_id": [project_id, "None", None] if project_id else None,
+        }
+        answers = await asyncio.gather(
+            *(
+                self.vector_store.query_sources(vector, filters=filters, limit=limit)
+                for vector in vectors
+            )
+        )
+        best: dict[str, float] = {}
+        for results in answers:
+            for chunk_id, score, _payload in results:
+                best[chunk_id] = max(score, best.get(chunk_id, score))
+        if not best:
+            return []
         rows = (
             await session.execute(
                 select(SourceChunk, SourceDocument)
                 .join(SourceDocument, SourceChunk.document_id == SourceDocument.id)
-                .where(SourceChunk.id.in_(ids))
+                .where(SourceChunk.id.in_([UUID(chunk_id) for chunk_id in best]))
             )
         ).all()
-        by_id = {str(chunk.id): (chunk, document) for chunk, document in rows}
         retrieved: list[RetrievedChunk] = []
-        for chunk_id, score, _payload in results:
-            item = by_id.get(chunk_id)
-            if item is None:
-                continue
-            chunk, document = item
+        for chunk, document in rows:
             if project_id and document.project_id and str(document.project_id) != project_id:
                 continue
             retrieved.append(
@@ -67,8 +103,8 @@ class QdrantHybridRetriever:
                         "text": chunk.text,
                         "concept_tags": chunk.concept_tags,
                     },
-                    score,
+                    best[str(chunk.id)],
                     ("qdrant_cosine",),
                 )
             )
-        return retrieved
+        return sorted(retrieved, key=lambda item: item.score, reverse=True)

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # Sampling temperature for every agent call (planner, script, storyboard,
     # code, translation, reviews) unless a call sets its own.
     agent_temperature: float = Field(default=0.7, ge=0, le=2)
+    # Shortest time each model call may take before the next fallback model is tried.
+    # Free models can need several minutes; calls that already allow longer keep that.
+    llm_request_timeout_seconds: int = Field(default=90, ge=10, le=1800)
     # Thinking budget for the main model's structured outputs (script drafts
     # and reviews). Reasoning tokens bill as output tokens.
     main_llm_structured_reasoning_effort: str = Field(default="high", pattern="^(low|medium|high)$")

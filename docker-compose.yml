@@ -93,7 +93,21 @@ services:
       - api
     restart: unless-stopped
 
+  # Optional local narration (Kokoro-82M on CPU). Start it with
+  #   docker compose --profile kokoro up -d kokoro
+  # and set TTS_PROVIDER=kokoro_http, TTS_BASE_URL=http://kokoro:8811, TTS_VOICE=af_heart.
+  kokoro:
+    build:
+      context: ./scripts
+      dockerfile: kokoro.Dockerfile
+    image: ekalavya-kokoro:latest
+    profiles: ["kokoro"]
+    volumes:
+      - kokoro-cache:/root/.cache
+    restart: unless-stopped
+
 volumes:
+  kokoro-cache:
   postgres-data:
   qdrant-data:
   temporal-data:

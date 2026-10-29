@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from scholarmotion.api import main as api_main
 from scholarmotion.api.main import (
     _hash_password,
     _issue_session,
@@ -15,6 +18,15 @@ from scholarmotion.api.main import (
 from scholarmotion.persistence.database import Base
 from scholarmotion.persistence.models import Project, UserAccount
 from scholarmotion.schemas import ProjectCreate
+
+
+@pytest.fixture(autouse=True)
+def offline_translation(monkeypatch):
+    """New chats translate their request to English; keep that off the network."""
+    monkeypatch.setattr(
+        api_main, "create_translation_provider", lambda _s: SimpleNamespace(name="mock")
+    )
+    monkeypatch.setattr(api_main, "create_machine_translator", lambda _s: None)
 
 
 def test_passwords_are_salted_and_verified_with_scrypt():

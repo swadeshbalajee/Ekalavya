@@ -7,7 +7,19 @@ export type User = {
   default_duration_minutes: number;
   default_text_language: string;
   default_voice_language: string;
+  research_settings: Record<string, number>;
   is_admin: boolean;
+};
+
+export type ResearchKnob = {
+  key: string;
+  label: string;
+  help: string;
+  default: number;
+  min: number;
+  max: number;
+  cost_per_step_usd: number;
+  seconds_per_step: number;
 };
 
 export type Project = {

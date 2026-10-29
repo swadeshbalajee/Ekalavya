@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, Field
 
@@ -77,9 +78,16 @@ invent results or numbers that are not in the plan. Say clearly when an example 
 Near the end, cover the paper's contribution, its limitations and what the student should
 remember."""
 
+CURATED_PLAN_RULES = """Follow the LESSON PLAN, written by a curator who read all the material
+for this lesson; you do not see that material, so the plan is your grounding. Teach each
+section's key points in that section's segments, in order. Use its worked examples with
+their exact numbers, its equations unchanged, and its source wording where given. Never add
+facts, numbers or results that are not in the plan or in passages you looked up."""
+
 TEACHER_VOICE = """VOICE: You are the learner's teacher, speaking to them directly in this video.
 Speak in the first person ("I", "let me show you", "we can see") and address the learner as
-"you". Never talk about yourself, a narrator, a presenter or the video in the third person, and
+"you", the way a teacher talks: use "I" where a teacher naturally would, and never open
+sentences with filler such as "I see" or "I show you"; most sentences simply state the idea. Never talk about yourself, a narrator, a presenter or the video in the third person, and
 never describe the learner as "the student" or "the viewer". If the learner asked for a
 particular voice, person, tone or style, follow it exactly."""
 
@@ -226,7 +234,12 @@ def _build_prompt(
         "Synthesize the idea and test a boundary, misconception, implication, or limitation. Use evidence for claims about a source; finish with what the learner can now explain.",
     ]
     move_index = min(segment_index - 1, len(teaching_moves) - 1)
-    teaching_move = teaching_moves[move_index]
+    # A planned section says what it teaches; the generic moves are only for a bare outline.
+    teaching_move = (
+        "teach this section's planned points: " + "; ".join(item.key_points)
+        if item.key_points
+        else teaching_moves[move_index]
+    )
     earlier = (
         "\n".join(f"- {text[:700]}" for text in (earlier_segments or [])[-3:])
         or "(none; this is the first segment)"
@@ -307,8 +320,12 @@ async def write_script(
     learner_level: str = "general",
     review_callback=None,
     source_scope: str = "none",
+    lookup: Callable[[str, str], Awaitable[str]] | None = None,
 ) -> list[NarrationBlock]:
     """Outline -> per-segment LLM narration grounded in retrieved evidence.
+
+    For a curated lesson the writer works from the curator's plan only;
+    ``lookup(task, plan)`` lets it pull passages the plan left out.
 
     ``review_callback(round, review)`` is awaited after each script review so the
     learner can see why a draft was revised.
@@ -325,29 +342,53 @@ async def write_script(
             for chapter, (item, count) in enumerate(zip(curriculum.items, scene_counts), 1)
             for _ in range(count)
         ]
-        paper_lecture = any(
-            item.key_points or item.plots or item.equations for item in curriculum.items
+        # Older paper plans carry no kind; their chapters are recognised by their content.
+        paper_lecture = curriculum.kind == "paper" or (
+            curriculum.kind == "outline"
+            and any(item.key_points or item.plots or item.equations for item in curriculum.items)
         )
+        curated = curriculum.kind == "curated"
         outline = "\n".join(
             f"Segment {i}: {item.title}; {item.objective}; {seconds:.1f} seconds, "
             f"at most {max(18, round(seconds * 2))} spoken words."
             for i, (_, item, seconds) in enumerate(slots, 1)
         )
-        if paper_lecture:
-            outline += "\n\nCHAPTER PLAN:\n" + "\n".join(
+        plan_text = ""
+        if paper_lecture or curated:
+            plan_text = "\n".join(
                 _chapter_plan(chapter, item) for chapter, item in enumerate(curriculum.items, 1)
             )
+            outline += f"\n\n{'CHAPTER' if paper_lecture else 'LESSON'} PLAN:\n{plan_text}"
+        looked_up = (
+            await lookup("write the narration for this lesson", plan_text)
+            if lookup is not None and curated
+            else ""
+        )
+        plan_notes = (
+            f"{CURATED_PLAN_RULES}\n"
+            + (f"Kind of ask: {curriculum.ask_kind}\n" if curriculum.ask_kind else "")
+            + (f"The curator suggests ending: {curriculum.ending}\n" if curriculum.ending else "")
+            + (f"PASSAGES YOU LOOKED UP:\n{looked_up}\n" if looked_up else "")
+            if curated
+            else ""
+        )
         prompt = (
             f"{RULES}\n{TEACHER_VOICE}\n{NATURAL_ENDING}\n"
-            f"{PAPER_LECTURE_RULES if paper_lecture else ''}\n"
+            f"{PAPER_LECTURE_RULES if paper_lecture else ''}{plan_notes}\n"
             f"{SOURCE_POLICIES.get(source_scope, '')}\n{skill_context}\n"
             f"Learner: {learner_request}\nLevel: {learner_level}\n"
-            f"Grounding: {evidence}\n{outline}\n"
+            + ("" if curated else f"Grounding: {evidence}\n")
+            + f"{outline}\n"
             f"Return exactly {len(slots)} ordered segments. Write one coherent lesson: "
             "Give every segment a concise title and a specific learning_objective covering only "
             "what that scene actually teaches, rather than copying the full lesson objective. "
-            "introduce the problem, develop its mechanism, then resolve it with a meaningful "
-            "takeaway. Each scene continues the previous one, with consistent symbols, numbers "
+            + (
+                "Follow the plan's sections in order. "
+                if curated or paper_lecture
+                else "Introduce the problem, develop its mechanism, then resolve it with a "
+                "meaningful takeaway. "
+            )
+            + "Each scene continues the previous one, with consistent symbols, numbers "
             "and example. Never announce a next scene unless that scene actually follows. "
             "The final segment must finish the explanation and then close naturally as ENDING "
             "describes, not with a teaser, a new topic, or an unfinished calculation. Respect "

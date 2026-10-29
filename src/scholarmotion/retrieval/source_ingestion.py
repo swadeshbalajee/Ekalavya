@@ -6,6 +6,7 @@ here, so a PDF and a web page are parsed, embedded and indexed the same way.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from collections.abc import Callable
@@ -19,7 +20,7 @@ from scholarmotion.config import Settings
 from scholarmotion.persistence.models import SourceChunk, SourceDocument
 from scholarmotion.persistence.qdrant import QdrantConfig, QdrantUnavailable, QdrantVectorStore
 from scholarmotion.providers import create_embedding_provider
-from scholarmotion.retrieval.paper_download import fetch_link
+from scholarmotion.retrieval.paper_download import FetchedLink, fetch_link
 from scholarmotion.retrieval.paper_ingestion import PaperParser, ParsedPaper
 from scholarmotion.retrieval.web_page import parse_web_page
 
@@ -127,24 +128,11 @@ async def _free_key(session, project_id: UUID, filename: str, url: str) -> str:
     return f"{project_id}/sources/{stem}-{hashlib.sha256(url.encode()).hexdigest()[:8]}{suffix}"
 
 
-async def ingest_link(
-    session, settings: Settings, store, project_id: UUID, url: str
-) -> SourceDocument:
-    """Read a PDF or web page link into this chat's sources (once per link).
-
-    Raises LinkUnreadable with a learner-facing reason when the link cannot be
-    fetched or holds no readable text; nothing is substituted for it.
-    """
-    url = url.strip()
-    for existing in (
-        await session.scalars(select(SourceDocument).where(SourceDocument.project_id == project_id))
-    ).all():
-        metadata = existing.metadata_json or {}
-        if metadata.get("source_url") == url and metadata.get("ingestion_status") == "complete":
-            return existing
+async def _read_link(url: str) -> FetchedLink:
+    """Download one link; failures become a learner-facing LinkUnreadable."""
     try:
         # Plain-http links are read over HTTPS; only public HTTPS hosts are fetched.
-        fetched = await fetch_link("https://" + url[7:] if url.startswith("http://") else url)
+        return await fetch_link("https://" + url[7:] if url.startswith("http://") else url)
     except ValueError as error:
         raise LinkUnreadable(url, str(error)) from error
     except httpx.HTTPStatusError as error:
@@ -155,6 +143,22 @@ async def ingest_link(
         raise LinkUnreadable(
             url, f"the site could not be reached ({type(error).__name__})"
         ) from error
+
+
+async def _already_read(session, project_id: UUID) -> dict[str, SourceDocument]:
+    documents = (
+        await session.scalars(select(SourceDocument).where(SourceDocument.project_id == project_id))
+    ).all()
+    return {
+        (document.metadata_json or {}).get("source_url"): document
+        for document in documents
+        if (document.metadata_json or {}).get("ingestion_status") == "complete"
+    }
+
+
+async def _index_fetched(
+    session, settings: Settings, store, project_id: UUID, url: str, fetched: FetchedLink
+) -> SourceDocument:
     key = await _free_key(session, project_id, fetched.filename, url)
     store.put_bytes(key, fetched.data, overwrite=True)
     document = SourceDocument(
@@ -182,3 +186,42 @@ async def ingest_link(
         await session.flush()
         raise LinkUnreadable(url, reason)
     return document
+
+
+async def ingest_link(
+    session, settings: Settings, store, project_id: UUID, url: str
+) -> SourceDocument:
+    """Read a PDF or web page link into this chat's sources (once per link).
+
+    Raises LinkUnreadable with a learner-facing reason when the link cannot be
+    fetched or holds no readable text; nothing is substituted for it.
+    """
+    url = url.strip()
+    existing = (await _already_read(session, project_id)).get(url)
+    if existing is not None:
+        return existing
+    return await _index_fetched(session, settings, store, project_id, url, await _read_link(url))
+
+
+async def ingest_links(
+    session, settings: Settings, store, project_id: UUID, urls: list[str]
+) -> list[SourceDocument]:
+    """Read several links: downloads run in parallel, indexing one at a time.
+
+    The database session cannot be shared across tasks, so only the network part
+    is concurrent. The first unreadable link (in the learner's order) is raised.
+    """
+    urls = [url.strip() for url in urls]
+    known = await _already_read(session, project_id)
+    pending = list(dict.fromkeys(url for url in urls if url not in known))
+    downloads = await asyncio.gather(*(_read_link(url) for url in pending), return_exceptions=True)
+    fetched = dict(zip(pending, downloads, strict=True))
+    documents: list[SourceDocument] = []
+    for url in urls:
+        if url not in known:
+            result = fetched[url]
+            if isinstance(result, BaseException):
+                raise result
+            known[url] = await _index_fetched(session, settings, store, project_id, url, result)
+        documents.append(known[url])
+    return documents

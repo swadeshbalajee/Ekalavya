@@ -85,6 +85,7 @@ from scholarmotion.persistence.models import (
     SourceDocument,
     TimelineSegment,
     TutorMessage,
+    UsageEvent,
     UserAccount,
     UserSession,
     WorkflowExecution,
@@ -96,6 +97,7 @@ from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.providers import (
     create_llm_provider,
     create_machine_translator,
+    create_planner_provider,
     create_translation_provider,
 )
 from scholarmotion.retrieval.source_ingestion import (
@@ -122,6 +124,8 @@ from scholarmotion.schemas import (
     UserLoginRequest,
     UserRegisterRequest,
 )
+from scholarmotion.services import research_settings as research
+from scholarmotion.services.chat_memory import compact, forget_from
 from scholarmotion.services.index_reconciliation import reconcile_qdrant_index
 from scholarmotion.services.usage_records import new_run_id, usage_rows
 from scholarmotion.skills.bootstrap import bootstrap_system_knowledge
@@ -210,6 +214,7 @@ def _user_payload(user: UserAccount) -> dict:
         "default_duration_minutes": user.default_duration_minutes,
         "default_text_language": user.default_text_language,
         "default_voice_language": user.default_voice_language,
+        "research_settings": research.resolve(user.research_settings).model_dump(),
         "is_admin": user.username.casefold()
         in {name.strip().casefold() for name in settings.admin_usernames.split(",")},
     }
@@ -457,11 +462,39 @@ async def update_authenticated_user(
     if authenticated is None:
         raise HTTPException(401, "authentication required")
     user = authenticated[0]
-    for field, value in payload.model_dump(exclude_none=True).items():
+    values = payload.model_dump(exclude_none=True)
+    if "research_settings" in values:
+        merged = {**(user.research_settings or {}), **values.pop("research_settings")}
+        user.research_settings = research.resolve(merged).model_dump()
+    for field, value in values.items():
         setattr(user, field, value.strip() if isinstance(value, str) else value)
     await session.commit()
     await session.refresh(user)
     return _user_payload(user)
+
+
+@app.get("/v1/research/options")
+async def research_options(session: SessionDep, authorization: Authorization = None):
+    """The research-depth settings with ranges, and the measured cost of one step of each."""
+    if await _user_from_token(session, _bearer_token(authorization)) is None:
+        raise HTTPException(401, "authentication required")
+    since = datetime.now(UTC) - timedelta(days=30)
+    rows = (
+        await session.execute(
+            select(UsageEvent.purpose, func.sum(UsageEvent.cost_usd), func.count())
+            .where(UsageEvent.created_at >= since, UsageEvent.cost_usd.is_not(None))
+            .group_by(UsageEvent.purpose)
+        )
+    ).all()
+    # Purposes are labelled "stage:purpose"; a knob is measured by the call kind.
+    totals: dict[str, list[float]] = {}
+    for purpose, cost, calls in rows:
+        kind = purpose.rpartition(":")[2]
+        totals.setdefault(kind, [0.0, 0])
+        totals[kind][0] += float(cost or 0)
+        totals[kind][1] += calls
+    measured = {kind: cost / calls for kind, (cost, calls) in totals.items() if calls}
+    return {"settings": research.describe(measured)}
 
 
 @app.post("/v1/auth/logout", status_code=204)
@@ -1288,9 +1321,51 @@ async def _respond_to_chat(
 
 
 @app.post("/projects/{project_id}/chat", response_model=TutorChatResponse)
-async def tutor_chat(project_id: UUID, payload: TutorChatRequest, session: SessionDep):
+async def tutor_chat(
+    project_id: UUID,
+    payload: TutorChatRequest,
+    session: SessionDep,
+    background: BackgroundTasks = None,  # type: ignore[assignment]  # injected by FastAPI
+):
     project = await _owned_project(session, project_id)
-    return await _respond_to_chat(project_id, project, payload, session)
+    response = await _respond_to_chat(project_id, project, payload, session)
+    if background is not None:
+        background.add_task(compact_chat, project_id, current_user_id.get())
+    return response
+
+
+async def compact_chat(project_id: UUID, owner_id: UUID | None) -> None:
+    """Fold older turns into the chat's running summary once they are long enough."""
+    async with database.sessions() as session:
+        project = await session.get(Project, project_id)
+        if project is None:
+            return
+        owner = await session.get(UserAccount, owner_id) if owner_id else None
+        with track_usage() as ledger:
+            changed = await compact(
+                session,
+                create_planner_provider(settings),
+                project,
+                await chat_history(session, project_id),
+                research.resolve(owner.research_settings if owner else None).chat_turns_kept,
+            )
+        if ledger.entries:
+            try:
+                if any(entry.cost_usd is None for entry in ledger.entries):
+                    ledger.estimate_missing_costs(await openrouter_prices(settings))
+                session.add_all(
+                    usage_rows(
+                        ledger,
+                        user_id=owner_id,
+                        project_id=project_id,
+                        operation="chat_summary",
+                        run_id=new_run_id(),
+                    )
+                )
+            except Exception as error:  # noqa: BLE001 - accounting must never fail compaction
+                logger.warning("Could not record summary usage: %s", error)
+        if changed or ledger.entries:
+            await session.commit()
 
 
 @app.post("/v1/temporary-chat", response_model=TutorChatResponse)
@@ -1346,6 +1421,8 @@ async def edit_tutor_message(
         metadata = dict(item.metadata_json or {})
         metadata.update(superseded=True, branch_group=group, branch_index=old_index)
         item.metadata_json = metadata
+    # A summary that covers the replaced turn is rebuilt from the new branch.
+    forget_from(project, edited.created_at)
     await session.flush()
 
     # Keep the canonical project brief aligned when the first learner turn is
