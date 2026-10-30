@@ -11,6 +11,7 @@ docs
 tests
 scripts
 !scripts/retitle_chats.py
+!scripts/migrate_project_storage.py
 web
 **/__pycache__
 **/*.py[cod]
