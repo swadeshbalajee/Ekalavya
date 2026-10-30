@@ -12,6 +12,7 @@ tests
 scripts
 !scripts/retitle_chats.py
 !scripts/migrate_project_storage.py
+!scripts/eval_scenes.py
 web
 **/__pycache__
 **/*.py[cod]
