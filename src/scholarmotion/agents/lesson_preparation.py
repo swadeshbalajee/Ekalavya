@@ -28,10 +28,26 @@ SUPPORTED_LANGUAGES = (
 MAX_LESSON_MINUTES = 30.0
 
 
+class SceneEdit(BaseModel):
+    """One operation of a video edit, on one scene of VIDEO SCENES."""
+
+    op: Literal["change", "insert_after", "delete", "split", "merge_with_next", "move_after"] = (
+        "change"
+    )
+    # The scene's id; for insert_after, the scene the new one follows ("" = at the start).
+    scene: str = ""
+    # For move_after: the scene to place it after ("" = at the start).
+    after: str = ""
+    # What to change, or what a new scene teaches; each scene can have its own.
+    instruction: str = ""
+
+
 class LessonPreparation(BaseModel):
     """A versionable contract between chat, retrieval, editing and lesson generation."""
 
-    action: Literal["answer", "generate_video", "edit_video", "localize_video"] = "answer"
+    action: Literal["answer", "generate_video", "edit_video", "localize_video", "restore_video"] = (
+        "answer"
+    )
     # whole_paper: a long lecture covering one attached paper end to end.
     lesson_scope: Literal["topic", "whole_paper"] = "topic"
     # For a whole-paper lecture: the exact title, from ATTACHED PAPERS, of the paper meant.
@@ -59,6 +75,10 @@ class LessonPreparation(BaseModel):
     edit_start_seconds: float | None = None
     edit_end_seconds: float | None = None
     edit_instruction: str = ""
+    # Video edits as per-scene operations (change, insert, delete, split, merge, move).
+    edits: list[SceneEdit] = Field(default_factory=list)
+    # Words the narrator says wrongly, mapped to a spelling the speech engine says right.
+    pronunciations: dict[str, str] = Field(default_factory=dict)
     # Learner profile for a new lesson.
     duration_minutes: float | None = None
     topic: str = ""
@@ -187,6 +207,9 @@ Return these decisions:
     is too fast'. Only possible when VIDEO SCENES lists scenes.
   * localize_video: change the language of the existing video or of some of its scenes: 'make it
     Tamil', 'explain scene 2 in Hindi', 'change only scene 2 to Tamil'.
+  * restore_video: go back to an earlier video ('undo that', 'go back to the previous version',
+    'I liked the first one better'). Set target_video_version to the version meant; for 'undo',
+    the version just before the current one in VIDEO VERSIONS.
 - target_scenes: for edit_video and localize_video, the ids from VIDEO SCENES the learner means
   (by number, position such as 'the last one', title, content or time). Use an empty list when
   the request is about the whole video or is given only as a time range.
@@ -207,6 +230,27 @@ Return these decisions:
 - edit_start_seconds / edit_end_seconds: for edit_video given as a time range (convert '1:05' to
   65). Leave empty when target_scenes identifies the part.
 - edit_instruction: for edit_video, the requested change as a clear English instruction.
+- edits: for edit_video, the changes as a list, one entry per scene and operation, in the order
+  the learner gave them. Each entry has op, scene (an id from VIDEO SCENES), after and
+  instruction:
+  * change: rebuild that scene following its own instruction (its narration, its visuals or
+    both). Different scenes can get different instructions, and scenes in between stay as they
+    are ('simplify scene 2 and add pauses before the answers in scene 5' is two entries).
+  * insert_after: add a NEW scene after scene ('' = at the very start); instruction says what
+    it teaches.
+  * delete: remove the scene.
+  * split: split the scene in two; instruction may say where or what each part covers.
+  * merge_with_next: combine the scene with the one after it.
+  * move_after: move the scene to just after the scene named in after ('' = to the start).
+  Leave edits empty for a change to the whole video (use whole_video and edit_instruction) or a
+  change given only as a time range.
+- pronunciations: for edit_video when the learner says the narrator says a word wrongly: the
+  word as written mapped to a spelling the speech engine will say correctly ('Euler': 'Oiler').
+  Subtitles keep the original word. Add a change entry for each scene that uses the word.
+- LARGE EDIT CHECK: when an edit_video would rebuild 5 or more scenes, or the whole video, and the
+  learner has not already confirmed it, choose action answer, keep the edit fields, and in reply
+  say how many scenes will be rebuilt with the time and cost estimate from VIDEO STATUS, then ask
+  whether to go ahead. When they confirm, choose edit_video with the same changes.
 - lesson_scope: whole_paper when a paper is attached (see ATTACHED PAPERS) and the learner wants
   that paper itself explained as a video lecture ('explain this paper', 'walk me through the
   pdf'). A whole-paper lecture is always generate_video. Otherwise topic; a written summary of
@@ -333,6 +377,19 @@ def _validated(
     result.retrieval_query = result.retrieval_query.strip() or fallback.retrieval_query
     known = {str(scene["id"]) for scene in video_scenes}
     result.target_scenes = [item for item in result.target_scenes if item in known]
+    # An operation must name real scenes; only an insert or move may point at the start.
+    result.edits = [
+        edit
+        for edit in result.edits
+        if (edit.scene in known or (edit.op == "insert_after" and not edit.scene))
+        and (edit.op != "move_after" or not edit.after or edit.after in known)
+        and (edit.op != "insert_after" or edit.instruction.strip())
+    ]
+    result.pronunciations = {
+        word.strip(): spoken.strip()
+        for word, spoken in result.pronunciations.items()
+        if word.strip() and spoken.strip() and word.strip() != spoken.strip()
+    }
     result.reply = result.reply.strip()
     if result.action in {"edit_video", "localize_video"} and not video_scenes:
         result.action = "answer"
@@ -341,6 +398,9 @@ def _validated(
     earlier = {item["version"] for item in video_versions or [] if not item.get("current")}
     if result.target_video_version not in earlier:
         result.target_video_version = None
+    if result.action == "restore_video" and result.target_video_version is None:
+        # Nothing earlier to go back to (or no such version): answer instead.
+        result.action = "answer"
     if result.paper not in attached_papers:
         result.paper = ""
     if not attached_papers:

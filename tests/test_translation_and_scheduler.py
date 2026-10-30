@@ -22,6 +22,7 @@ from scholarmotion.schemas import (
     TutorChatRequest,
     VisualBeat,
 )
+from scholarmotion.services.edit_plan import EditPlan
 from scholarmotion.services.orchestration import ScholarMotionPipeline
 from scholarmotion.translation.service import (
     TranslationService,
@@ -350,7 +351,8 @@ async def test_tutor_chat_persists_and_recognizes_timestamp_edit(monkeypatch):
         assert decision.action == "edit_range"
         assert decision.start == 130
         assert decision.end == 150
-        assert decision.instruction == "Change the example."
+        edits = EditPlan.decode(decision.instruction, []).edits
+        assert [edit.instruction for edit in edits] == ["Change the example."]
         assert [message.role for message in await chat_history(session, project.id)] == [
             "user",
             "assistant",

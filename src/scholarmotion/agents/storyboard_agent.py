@@ -129,6 +129,13 @@ async def _plan_batch(
         lesson_plan = LessonVisualPlan.model_validate(json.loads(cleaned))
         return {plan.block_id: plan for plan in lesson_plan.scenes}
     except Exception as error:  # noqa: BLE001 - provider errors should not erase a lesson
+        logger.warning("Lesson visual plan was unreadable, asking once more: %s", error)
+    # A long plan sometimes comes back as broken JSON; structured output asks again
+    # in a form the provider checks, which costs far less than generic visuals.
+    try:
+        lesson_plan = await provider.generate_structured(prompt, LessonVisualPlan)
+        return {plan.block_id: plan for plan in lesson_plan.scenes}
+    except Exception as error:  # noqa: BLE001 - provider errors should not erase a lesson
         logger.warning("Lesson visual planning failed; using topic fallbacks: %s", error)
         return {}
 

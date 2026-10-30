@@ -50,6 +50,7 @@ from scholarmotion.media.pauses import (
     speakable_with_pauses,
     with_markers,
 )
+from scholarmotion.media.pronunciation import respell, restore_spelling
 from scholarmotion.media.speech import to_speakable
 from scholarmotion.media.subtitles import cues_to_srt, cues_to_vtt, merge_scene_cues
 from scholarmotion.media.timeline import build_timeline, media_duration
@@ -153,7 +154,7 @@ def _fallback_video_findings(issues: list[dict]) -> list[dict]:
 
 from scholarmotion.retrieval.figure_regions import locate_figure_regions
 from scholarmotion.verification.aggregator import aggregate_reports
-from scholarmotion.verification.checklist import checklist_prompt, score_checklist
+from scholarmotion.verification.checklist import checklist_prompt, edit_check, score_checklist
 from scholarmotion.verification.figures import verify_paper_figures_shown
 from scholarmotion.verification.layout import verify_layout
 from scholarmotion.verification.math import verify_required_equations
@@ -185,6 +186,7 @@ def scene_review_prompt(
     cues: list[tuple],
     source_code: str,
     notes: str = "",
+    extra: tuple = (),
 ) -> str:
     """Ask a video model to check a scene item by item, as a student would watch it."""
     cue_lines = "\n".join(f"{start:.2f}-{end:.2f}s: {text}" for start, end, text in cues)
@@ -200,7 +202,7 @@ def scene_review_prompt(
         "lines, a highlight on the wrong part of a figure, and boxes with nothing in them are "
         "easy to miss in motion. If lesson_closing is tagged, the scene must end on a settled "
         "takeaway, not a teaser or an abrupt cut.\n"
-        + checklist_prompt()
+        + checklist_prompt(extra)
         + "\n(The source is given only to suggest code changes; judge what you see and hear.)\n"
         + (f"{notes}\n" if notes else "")
         + f"Scene objective: {objective}\nScene tags: {tags}\nNarration: {narration}\n"
@@ -1159,6 +1161,8 @@ class ScholarMotionPipeline:
             relevant = await self.corrections.retrieve(
                 tags=spec.tags, primitives=[beat.primitive for beat in spec.visual_beats]
             )
+        # An edited scene must also show the change the learner asked for.
+        review_extra = (edit_check(edit_request),) if edit_request.strip() else ()
         # What the correction notes are matched against: the kind of scene.
         scene_terms = {
             *spec.tags,
@@ -1174,10 +1178,11 @@ class ScholarMotionPipeline:
             audio = getattr(self, "_lesson_audio", {}).pop(spec.scene_id, None)
             if audio is None:
                 audio_path = self.storage.local_path(f"{base}/audio/v{artifact_version}.wav")
-                audio = await self.tts.synthesize(
-                    spoken_narration, audio_path, language=self.voice_language
+                said = respell(spoken_narration, spec.pronunciations)
+                audio = await self.tts.synthesize(said, audio_path, language=self.voice_language)
+                audio = restore_spelling(
+                    await self._measure_timings(audio, said), spec.pronunciations
                 )
-                audio = await self._measure_timings(audio, spoken_narration)
             # Narration is never time-stretched to fit the planner's estimate:
             # per-scene tempo changes made one narrator sound like several.
             # The animation is timed to the measured speech instead.
@@ -1392,6 +1397,7 @@ class ScholarMotionPipeline:
                         cues=[(cue.start, cue.end, cue.text) for cue in audio.sentence_timings],
                         source_code=generated.python_code,
                         notes="\n".join(self._corrections("review", scene_terms)),
+                        extra=review_extra,
                     )
                     qa_duration = self.assembler.probe_duration(str(qa_path)) or max(
                         video_duration or 0, audio.duration_seconds
@@ -1489,7 +1495,7 @@ class ScholarMotionPipeline:
                                 for issue in qa_issues
                             )
                             if answers:
-                                checked = score_checklist(spec.scene_id, answers)
+                                checked = score_checklist(spec.scene_id, answers, review_extra)
                                 layers["video"].extend(checked.issues)
                                 checklist_scores.append(
                                     {
@@ -2229,7 +2235,7 @@ class ScholarMotionPipeline:
         spoken: list[str],
     ) -> tuple[float, str | None] | None:
         """Speak one take and store each member scene's audio; None on failure."""
-        texts = [spoken[index] for index in members]
+        texts = [respell(spoken[index], specs[index].pronunciations) for index in members]
         paths = [
             self.storage.local_path(
                 f"{project_id}/scenes/{specs[index].scene_id}/audio/v{specs[index].version}.wav"
@@ -2280,7 +2286,9 @@ class ScholarMotionPipeline:
                 update["sentence_timings"] = sentence_timings_from_words(
                     text, scene_words, duration
                 )
-            self._lesson_audio[specs[index].scene_id] = take.model_copy(update=update)
+            self._lesson_audio[specs[index].scene_id] = restore_spelling(
+                take.model_copy(update=update), specs[index].pronunciations
+            )
             offset += duration
             first += count
         return sum(durations), take.voice_id

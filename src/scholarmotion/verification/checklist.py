@@ -85,9 +85,19 @@ WEIGHTS = {"must": 3, "high": 3, "medium": 2, "low": 1}
 _SEVERITY = {"must": "high", "high": "high", "medium": "medium", "low": "low"}
 
 
-def checklist_prompt() -> str:
+def edit_check(request: str) -> CheckItem:
+    """A must-pass item for an edited scene: the learner's change is really there."""
+    return CheckItem(
+        "edit_done",
+        "must",
+        f"The learner asked for this change to the scene: {request.strip()[:400]!r}. It is "
+        "visible or audible in this version.",
+    )
+
+
+def checklist_prompt(extra: tuple[CheckItem, ...] = ()) -> str:
     """The checklist and answer format for the video reviewer's prompt."""
-    lines = "\n".join(f"- {item.id}: {item.question}" for item in CHECKLIST)
+    lines = "\n".join(f"- {item.id}: {item.question}" for item in (*CHECKLIST, *extra))
     return (
         "Answer every checklist item for the whole scene, in this order:\n"
         f"{lines}\n"
@@ -107,16 +117,19 @@ class ChecklistResult:
     issues: list[VerificationIssue]
 
 
-def score_checklist(scene_id: str, answers: list[dict]) -> ChecklistResult:
+def score_checklist(
+    scene_id: str, answers: list[dict], extra: tuple[CheckItem, ...] = ()
+) -> ChecklistResult:
     """Score the reviewer's answers; an item it did not answer counts as passed.
 
     Failed items become repair findings. When the scene passes overall they are
     low severity (feedback only); when it fails they keep their weight's
     severity, and a summary finding says why the scene failed.
     """
+    items = (*CHECKLIST, *extra)
     by_id = {answer["id"]: answer for answer in answers}
-    total = sum(WEIGHTS[item.weight] for item in CHECKLIST)
-    failed = [item for item in CHECKLIST if by_id.get(item.id, {}).get("passed") is False]
+    total = sum(WEIGHTS[item.weight] for item in items)
+    failed = [item for item in items if by_id.get(item.id, {}).get("passed") is False]
     score = 1 - sum(WEIGHTS[item.weight] for item in failed) / total
     must_failed = [item for item in failed if item.weight == "must"]
     passed = score >= PASS_SCORE and not must_failed

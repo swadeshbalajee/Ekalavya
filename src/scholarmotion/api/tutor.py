@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from scholarmotion.agents.lesson_preparation import prepare_lesson
+from scholarmotion.agents.lesson_preparation import SceneEdit, prepare_lesson
 from scholarmotion.config import Settings
 from scholarmotion.persistence.models import (
     Project,
@@ -36,6 +36,7 @@ from scholarmotion.retrieval.web_research import format_sources, supports_web_se
 from scholarmotion.schemas import TutorChatRequest
 from scholarmotion.services import research_settings as research
 from scholarmotion.services.chat_memory import conversation_context
+from scholarmotion.services.edit_plan import EditPlan
 from scholarmotion.translation import TranslationService
 from scholarmotion.verification.answers import answer_problems
 
@@ -281,6 +282,27 @@ async def respond(
             language=text_language,
         )
 
+    if preparation.action == "restore_video":
+        if project.status != "COMPLETE":
+            return await _save_assistant(
+                session,
+                translator,
+                project,
+                canonical="The video is still being worked on; I can go back to an earlier "
+                "version once it is ready.",
+                action="wait",
+            )
+        version = preparation.target_video_version
+        restored = await _save_assistant(
+            session,
+            translator,
+            project,
+            canonical=preparation.reply or f"I have gone back to video version {version}.",
+            action="restore",
+        )
+        # The API makes that version current before saving the turn.
+        return replace(restored, base_version=version)
+
     if preparation.action in {"edit_video", "localize_video"}:
         if project.status != "COMPLETE":
             return await _save_assistant(
@@ -485,7 +507,10 @@ async def _default_languages(
 def _video_status(status: str) -> str:
     """The project's state in words the planner can reason about."""
     return {
-        "COMPLETE": "a finished video is ready",
+        "COMPLETE": (
+            "a finished video is ready. Rebuilding one scene takes about 3 minutes and costs "
+            "about $0.01 to $0.12; scenes are rebuilt 4 at a time"
+        ),
         "GENERATING": "a video is still being produced",
         "EDITING": "the video is being changed",
         "LOCALIZING": "the video's language is being changed",
@@ -515,7 +540,69 @@ def edit_range_for(preparation, scenes: list[Scene]) -> tuple[float, float] | No
     return min(scene.timeline_start for scene in scenes), length
 
 
+def edit_plan_for(preparation, scenes: list[Scene], canonical: str) -> EditPlan:
+    """The planner's edit as per-scene operations on this video's scenes.
+
+    Its own operations come first; otherwise the scenes it named (each with the
+    one instruction), or every scene in the time range or the whole video.
+    """
+    instruction = preparation.edit_instruction or canonical
+    plan = EditPlan(
+        edits=list(preparation.edits),
+        pronunciations=dict(preparation.pronunciations),
+        whole_video=preparation.whole_video,
+        summary=instruction,
+    )
+    if plan.edits:
+        return plan
+    named = set(preparation.target_scenes)
+    if named and not preparation.whole_video:
+        # Exactly the scenes named: 'scenes 2 and 5' leaves 3 and 4 alone.
+        plan.edits = [
+            SceneEdit(op="change", scene=scene.scene_key, instruction=instruction)
+            for scene in scenes
+            if scene.scene_key in named
+        ]
+        return plan
+    span = edit_range_for(preparation, scenes)
+    if span is not None:
+        start, end = span
+        plan.edits = [
+            SceneEdit(op="change", scene=scene.scene_key, instruction=instruction)
+            for scene in scenes
+            if scene.timeline_start < end and scene.timeline_end > start
+        ]
+    return plan
+
+
 async def _edit(session, translator, project, preparation, scenes, canonical) -> TutorDecision:
+    plan = edit_plan_for(preparation, scenes, canonical)
+    if plan.edits or plan.pronunciations:
+        numbers = {scene.scene_key: index for index, scene in enumerate(scenes, 1)}
+        named = [scene for scene in scenes if scene.scene_key in set(plan.touched())] or scenes
+        # A time range the learner gave is shown as given, not widened to whole scenes.
+        span = None if preparation.edits else edit_range_for(preparation, scenes)
+        start, end = span or (
+            min(scene.timeline_start for scene in named),
+            max(scene.timeline_end for scene in named),
+        )
+        confirmation = await _save_assistant(
+            session,
+            translator,
+            project,
+            canonical=preparation.reply or f"I will {plan.describe(numbers)}.",
+            action="edit_range",
+            start=start,
+            end=end,
+        )
+        return TutorDecision(
+            confirmation.message,
+            confirmation.canonical_message,
+            "edit_range",
+            confirmation.start,
+            confirmation.end,
+            plan.encode(),
+        )
     span = edit_range_for(preparation, scenes)
     if span is None:
         # Only reached when the named time range lies outside the video.

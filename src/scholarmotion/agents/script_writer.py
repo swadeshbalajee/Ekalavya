@@ -591,6 +591,89 @@ async def write_script(
     return blocks
 
 
+class BridgeFix(BaseModel):
+    scene: str
+    fix: str
+
+
+class TransitionReview(BaseModel):
+    fixes: list[BridgeFix] = Field(default_factory=list)
+
+
+async def write_new_scene(
+    provider, instruction: str, *, before: str = "", after: str = "", seconds: float = 40
+) -> ScriptSegment:
+    """Narration for a scene inserted into a finished lesson, between two existing ones."""
+    return await provider.generate_structured(
+        f"{RULES}\n{TEACHER_VOICE}\n{PACING}\n\n"
+        "A learner asked for a NEW scene to be added to their finished lesson. Write only that "
+        f"scene: about {max(18, round(seconds * 2))} spoken words. It must follow on from the "
+        "scene before it and lead into the scene after it, without repeating them.\n"
+        f"WHAT THE NEW SCENE SHOULD TEACH: {instruction}\n"
+        f"SCENE BEFORE IT: {before or '(none; this opens the lesson)'}\n"
+        f"SCENE AFTER IT: {after or '(none; this ends the lesson, so close it naturally)'}\n"
+        "Return the narration, a short title, a learning_objective, equations and key_terms.",
+        ScriptSegment,
+    )
+
+
+async def review_transitions(
+    provider, scenes: list[tuple[str, str]], boundaries: list[int]
+) -> dict[str, str]:
+    """Scenes whose opening no longer follows the scene before, with how to fix each.
+
+    ``scenes`` are (id, narration) in their new order; ``boundaries`` are the
+    indexes i where scene i follows scene i-1 after an edit and should be checked.
+    """
+    pairs = [index for index in sorted(set(boundaries)) if 0 < index < len(scenes)]
+    if not pairs or getattr(provider, "name", "") == "mock":
+        return {}
+    listed = "\n\n".join(
+        f"BOUNDARY {number}:\nSCENE {scenes[index - 1][0]} ENDS: ...{scenes[index - 1][1][-500:]}\n"
+        f"SCENE {scenes[index][0]} BEGINS: {scenes[index][1][:500]}..."
+        for number, index in enumerate(pairs, 1)
+    )
+    try:
+        review = await provider.generate_structured(
+            "A narrated lesson was just edited (scenes changed, added, removed or moved). For "
+            "each boundary below, decide whether the second scene still follows naturally from "
+            "the first as the learner hears them in a row. Report only real breaks: an opening "
+            "that refers to something no longer said before it, a jump with no bridge, or a "
+            "repeat of what was just said. For each, give scene (the second scene's id) and fix: "
+            "a precise instruction to rewrite that scene's opening sentence or two so it bridges "
+            "from the scene before. Return no fixes when every boundary flows.\n\n" + listed,
+            TransitionReview,
+        )
+    except Exception as error:  # noqa: BLE001 - a missing check must not stop an edit
+        logger.warning("Transition review unavailable: %s", error)
+        return {}
+    allowed = {scenes[index][0] for index in pairs}
+    return {fix.scene: fix.fix for fix in review.fixes if fix.scene in allowed and fix.fix.strip()}
+
+
+async def rewrite_opening(provider, opening: str, fix: str, *, before: str = "") -> str:
+    """A new first sentence or two for a scene, bridging from the scene before; "" if unavailable.
+
+    Only the opening is rewritten, so a bridge fix never changes, lengthens or
+    re-explains the rest of the scene.
+    """
+    prompt = (
+        f"{TEACHER_VOICE}\n\n"
+        "A scene in a narrated lesson must now follow a different scene. Rewrite ONLY its "
+        "opening (given below) so it bridges from the scene before. Keep what the opening "
+        "teaches, keep roughly the same length (one or two sentences), and write natural "
+        "spoken English with no markup. Return ONLY the new opening.\n\n"
+        f"WHAT TO FIX: {fix}\n"
+        f"THE SCENE BEFORE ENDS: ...{before[-400:]}\n"
+        f"CURRENT OPENING: {opening}\n\nNEW OPENING:"
+    )
+    try:
+        return (await provider.generate_text(prompt)).strip()
+    except Exception as error:  # noqa: BLE001 - provider SDK failures vary by adapter
+        logger.warning("Opening rewrite unavailable: %s", error)
+        return ""
+
+
 REVISION_RULES = """You are revising the spoken narration for one segment of a physics teaching video,
 because a student said they did not understand this part.
 
@@ -616,6 +699,8 @@ async def revise_narration(
     instruction: str,
     *,
     learning_objective: str = "",
+    before: str = "",
+    after: str = "",
 ) -> str:
     """Rewrite narration to satisfy a student's clarification request.
 
@@ -627,7 +712,13 @@ async def revise_narration(
         f"{REVISION_RULES}\n\n"
         f"Learning objective: {learning_objective or '(unchanged)'}\n\n"
         f"STUDENT'S REQUEST:\n{instruction}\n\n"
-        f"CURRENT NARRATION:\n{narration}\n\n"
+        + (
+            "The lesson around this scene (keep it connected: follow on from the first and "
+            f"lead into the second):\nBEFORE: ...{before[-400:]}\nAFTER: {after[:400]}...\n\n"
+            if before or after
+            else ""
+        )
+        + f"CURRENT NARRATION:\n{narration}\n\n"
         "REVISED NARRATION:"
     )
     try:

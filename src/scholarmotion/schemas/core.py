@@ -230,6 +230,9 @@ class SceneSpec(BaseModel):
     source_ids: list[str] = Field(default_factory=list)
     # Silences inserted into the recorded narration, e.g. before an answer.
     pauses: list[Pause] = Field(default_factory=list)
+    # Words the speech engine says wrongly -> a spelling it says right; only the
+    # recording uses them, subtitles keep the written word.
+    pronunciations: dict[str, str] = Field(default_factory=dict)
     start_visual_state: list[str] = Field(default_factory=list)
     end_visual_state: list[str] = Field(default_factory=list)
     layout: LayoutSpec = Field(default_factory=LayoutSpec)

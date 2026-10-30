@@ -14,6 +14,7 @@ from scholarmotion.config import Settings
 from scholarmotion.persistence.database import Base
 from scholarmotion.persistence.models import Project, Scene
 from scholarmotion.schemas import TutorChatRequest
+from scholarmotion.services.edit_plan import EditPlan
 
 
 class _Echo:
@@ -114,7 +115,8 @@ async def test_a_scene_edit_rebuilds_that_scenes_time_range(monkeypatch, session
     )
     assert decision.action == "edit_range"
     assert (decision.start, decision.end) == (61, 91)
-    assert decision.instruction == "Use one simple example."
+    edits = EditPlan.decode(decision.instruction, []).edits
+    assert [edit.instruction for edit in edits] == ["Use one simple example."]
 
 
 @pytest.mark.asyncio

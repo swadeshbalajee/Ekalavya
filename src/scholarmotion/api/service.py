@@ -6,6 +6,7 @@ import asyncio
 import functools
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
@@ -21,14 +22,23 @@ from scholarmotion.agents.paper_outline import (
     outline_paper,
     referenced_figures,
 )
-from scholarmotion.agents.script_writer import revise_narration
+from scholarmotion.agents.script_writer import (
+    review_transitions,
+    revise_narration,
+    rewrite_opening,
+    write_new_scene,
+)
+from scholarmotion.agents.storyboard_agent import plan_storyboard
 from scholarmotion.api.tutor import chat_history
 from scholarmotion.config import Settings
 from scholarmotion.editing.dependencies import invalidation_for
 from scholarmotion.manim_runtime.sandbox import SandboxRenderer
 from scholarmotion.media.alignment import align_words
+from scholarmotion.media.audio import align_visual_beats
 from scholarmotion.media.ffmpeg import FFmpegAssembler
-from scholarmotion.media.pauses import speakable_with_pauses, with_markers
+from scholarmotion.media.pauses import sentences, speakable_with_pauses, with_markers
+from scholarmotion.media.pronunciation import uses_any
+from scholarmotion.media.speech import to_speakable
 from scholarmotion.media.subtitles import cues_to_srt, cues_to_vtt, merge_scene_cues
 from scholarmotion.media.timeline import build_timeline, media_duration
 from scholarmotion.memory.correction_folder import CorrectionFolder
@@ -95,10 +105,18 @@ from scholarmotion.retrieval.project_papers import (
     project_sources,
 )
 from scholarmotion.retrieval.qdrant_retrieval import QdrantHybridRetriever
-from scholarmotion.schemas import ArtifactKind, PaperFigure, SceneSpec, TimingCue, TTSResult
+from scholarmotion.schemas import (
+    ArtifactKind,
+    NarrationBlock,
+    PaperFigure,
+    SceneSpec,
+    TimingCue,
+    TTSResult,
+)
 from scholarmotion.services import BuildResult, ScholarMotionPipeline
 from scholarmotion.services import research_settings as research
 from scholarmotion.services.chat_memory import recall
+from scholarmotion.services.edit_plan import EditPlan
 from scholarmotion.services.usage_records import new_run_id, usage_rows
 from scholarmotion.skills import SkillService
 from scholarmotion.translation import TranslationService
@@ -1273,7 +1291,6 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
             raise
 
 
-@_metered("edit")
 async def _recheck_edited_figures(
     session, runtime: ScholarMotionPipeline, project_id: UUID, spec: SceneSpec, instruction: str
 ) -> SceneSpec:
@@ -1334,6 +1351,189 @@ async def _recheck_edited_figures(
     return spec.model_copy(update={"paper_figures": figures})
 
 
+@dataclass
+class _EditSlot:
+    """One scene of the edited video, in its new position."""
+
+    key: str
+    spec: SceneSpec
+    row: Scene | None = None  # None for a scene the edit adds
+    request: str = ""  # what the learner asked for this scene
+    rebuild: bool = False
+    narration_changed: bool = False
+    revise: bool = False  # rewrite the narration to answer ``request``
+    spec_changed: bool = False
+    new_text: bool = False  # narration replaced (added, split or merged): plan visuals again
+
+
+def _split_narration(spec: SceneSpec) -> tuple[tuple[str, list], tuple[str, list]]:
+    """The narration cut at the sentence boundary nearest its middle, with its pauses."""
+    parts = sentences(spec.narration)
+    if len(parts) < 2:
+        raise ValueError(f"{spec.scene_id} has one sentence and cannot be split")
+    words = [len(part.split()) for part in parts]
+    cut, total = 1, 0
+    for index, count in enumerate(words[:-1], 1):
+        total += count
+        cut = index
+        if total >= sum(words) / 2:
+            break
+    first = [pause for pause in spec.pauses if pause.after_sentence < cut]
+    second = [
+        pause.model_copy(update={"after_sentence": pause.after_sentence - cut})
+        for pause in spec.pauses
+        if pause.after_sentence >= cut
+    ]
+    return (" ".join(parts[:cut]), first), (" ".join(parts[cut:]), second)
+
+
+async def _saved_versions(session, scene_id) -> tuple[int, int]:
+    """The highest spec version and code/audio/render version ever saved for a scene.
+
+    After an undo the active versions are older than ones already saved, so a
+    new version is numbered after the highest saved, never after the active one.
+    """
+    spec = await session.scalar(
+        select(func.max(SceneSpecification.version)).where(SceneSpecification.scene_id == scene_id)
+    )
+    artifacts = [
+        await session.scalar(select(func.max(model.version)).where(model.scene_id == scene_id))
+        for model in (GeneratedCode, AudioArtifact, RenderArtifact)
+    ]
+    return spec or 0, max((value or 0 for value in artifacts), default=0)
+
+
+def _opening_length(text: str) -> int:
+    """How many leading sentences a bridge fix may rewrite: one or two, never the whole scene."""
+    count = len(sentences(text))
+    return 1 if count <= 2 else 2
+
+
+def _with_opening(spec: SceneSpec, opening: str) -> SceneSpec:
+    """``spec`` with its first sentence or two replaced by ``opening``; pauses stay in place."""
+    parts = sentences(spec.narration)
+    cut = _opening_length(spec.narration)
+    text, opening_pauses = speakable_with_pauses(opening, to_speakable)
+    added = len(sentences(text))
+    if not added:
+        return spec
+    pauses = [pause for pause in opening_pauses if pause.after_sentence < added]
+    pauses += [
+        pause.model_copy(update={"after_sentence": pause.after_sentence - cut + added})
+        for pause in spec.pauses
+        if pause.after_sentence >= cut
+    ]
+    return spec.model_copy(update={"narration": " ".join([text, *parts[cut:]]), "pauses": pauses})
+
+
+def _merged(first: SceneSpec, second: SceneSpec) -> SceneSpec:
+    offset = len(sentences(first.narration))
+    return first.model_copy(
+        update={
+            "narration": f"{first.narration} {second.narration}",
+            "pauses": [
+                *first.pauses,
+                *(
+                    pause.model_copy(update={"after_sentence": pause.after_sentence + offset})
+                    for pause in second.pauses
+                ),
+            ],
+            "equations": list(dict.fromkeys([*first.equations, *second.equations])),
+            "key_terms": list(dict.fromkeys([*first.key_terms, *second.key_terms])),
+            "data_plots": [*first.data_plots, *second.data_plots],
+            "paper_figures": [*first.paper_figures, *second.paper_figures],
+            "source_ids": list(dict.fromkeys([*first.source_ids, *second.source_ids])),
+            "duration_target_seconds": min(
+                600, first.duration_target_seconds + second.duration_target_seconds
+            ),
+        }
+    )
+
+
+def _arrange(slots: list[_EditSlot], plan: EditPlan, next_key) -> list[_EditSlot]:
+    """Apply the plan's operations to the scene order; texts are written later."""
+    # Where removed scenes stood, so "add a scene after S05" still works when the
+    # same edit deletes S05 (the new scene takes its place).
+    removed_at: dict[str, int] = {}
+    for edit in plan.edits:
+        index = next((i for i, slot in enumerate(slots) if slot.key == edit.scene), None)
+        if edit.op == "insert_after":
+            if not edit.scene:
+                at = 0
+            elif index is not None:
+                at = index + 1
+            elif edit.scene in removed_at:
+                at = min(removed_at[edit.scene], len(slots))
+            else:
+                continue
+            if not slots:
+                continue
+            template = slots[min(at, len(slots) - 1)].spec
+            slots.insert(
+                at,
+                _EditSlot(
+                    next_key(),
+                    template.model_copy(
+                        update={
+                            "narration": "",
+                            "pauses": [],
+                            "data_plots": [],
+                            "paper_figures": [],
+                        }
+                    ),
+                    request=edit.instruction,
+                    rebuild=True,
+                    narration_changed=True,
+                    spec_changed=True,
+                    new_text=True,
+                ),
+            )
+            continue
+        if index is None:
+            continue
+        slot = slots[index]
+        if edit.op == "delete":
+            slots.pop(index)
+            removed_at[slot.key] = index
+        elif edit.op == "move_after":
+            slots.pop(index)
+            target = next((i for i, other in enumerate(slots) if other.key == edit.after), -1)
+            slots.insert(target + 1, slot)
+        elif edit.op == "split":
+            (text_a, pauses_a), (text_b, pauses_b) = _split_narration(slot.spec)
+            half = slot.spec.duration_target_seconds / 2
+            slot.spec = slot.spec.model_copy(
+                update={"narration": text_a, "pauses": pauses_a, "duration_target_seconds": half}
+            )
+            second = _EditSlot(
+                next_key(),
+                slot.spec.model_copy(
+                    update={
+                        "narration": text_b,
+                        "pauses": pauses_b,
+                        "title": f"{slot.spec.title} (continued)",
+                        "data_plots": [],
+                        "paper_figures": [],
+                    }
+                ),
+            )
+            for part in (slot, second):
+                part.rebuild = part.narration_changed = part.spec_changed = part.new_text = True
+                part.request = edit.instruction
+            slots.insert(index + 1, second)
+        elif edit.op == "merge_with_next" and index + 1 < len(slots):
+            absorbed = slots.pop(index + 1)
+            removed_at[absorbed.key] = index + 1
+            slot.spec = _merged(slot.spec, absorbed.spec)
+            slot.rebuild = slot.narration_changed = slot.spec_changed = slot.new_text = True
+            slot.request = edit.instruction
+        elif edit.op == "change":
+            slot.rebuild = True
+            slot.request = "; ".join(filter(None, [slot.request, edit.instruction]))
+    return slots
+
+
+@_metered("edit")
 async def edit_range(
     database: Database,
     settings: Settings,
@@ -1344,6 +1544,15 @@ async def edit_range(
     *,
     localization_only: bool = False,
 ) -> list[str]:
+    """Apply an edit to the current video and save the result as a new video version.
+
+    ``instruction`` is an EditPlan (per-scene changes, added, removed, split,
+    merged or moved scenes, pronunciation fixes) or, from older callers, a
+    plain instruction for every scene between ``start`` and ``end``. Only the
+    scenes the edit touches are rebuilt, in parallel; every scene whose
+    neighbour changed is checked for a broken bridge; nothing is saved unless
+    every rebuilt scene was produced, so a failed edit leaves the video as it was.
+    """
     async with database.sessions() as session:
         project = await session.get(Project, project_id)
         if project is None:
@@ -1357,19 +1566,16 @@ async def edit_range(
                 )
             ).all()
         )
-        affected = [
-            scene
+        in_range = [
+            scene.scene_key
             for scene in scenes
-            if scene.timeline_start is not None
-            and scene.timeline_end is not None
+            if scene.timeline_end is not None
             and scene.timeline_start < end
             and scene.timeline_end > start
         ]
-        if not affected:
-            raise ValueError("selected range does not intersect any scene")
-        classifications = await classify_feedback(create_planner_provider(settings), instruction)
-        classification = classifications[0]
-        plan = invalidation_for(classification.feedback_type, instruction)
+        plan = EditPlan.decode(instruction, in_range)
+        if not plan.edits and not plan.pronunciations:
+            raise ValueError("the edit names no scene of this video")
         runtime = create_pipeline(
             settings,
             session,
@@ -1377,9 +1583,9 @@ async def edit_range(
             text_language=project.text_language,
             voice_language=project.voice_language,
         )
-        affected_keys: list[str] = []
-        for scene in affected:
-            affected_keys.append(scene.scene_key)
+        slots: list[_EditSlot] = []
+        saved: dict[str, tuple[int, int]] = {}
+        for scene in scenes:
             spec_row = await session.scalar(
                 select(SceneSpecification).where(
                     SceneSpecification.scene_id == scene.id, SceneSpecification.active.is_(True)
@@ -1387,147 +1593,316 @@ async def edit_range(
             )
             if spec_row is None:
                 raise RuntimeError(f"active SceneSpec missing for {scene.scene_key}")
-            spec = SceneSpec.model_validate(spec_row.payload)
-            narration_changed = plan.regenerate_audio or localization_only
-            if not localization_only and plan.root in {
+            slots.append(
+                _EditSlot(scene.scene_key, SceneSpec.model_validate(spec_row.payload), scene)
+            )
+            saved[scene.scene_key] = await _saved_versions(session, scene.id)
+        before = [slot.key for slot in slots]
+        used = {
+            int(key[1:])
+            for key in (
+                await session.scalars(select(Scene.scene_key).where(Scene.project_id == project_id))
+            ).all()
+            if key[1:].isdigit()
+        }
+
+        def next_key() -> str:
+            number = max(used, default=0) + 1
+            used.add(number)
+            return f"S{number:02d}"
+
+        slots = _arrange(slots, plan, next_key)
+        if not slots:
+            raise ValueError("an edit cannot remove every scene")
+        if plan.pronunciations:
+            for slot in slots:
+                if uses_any(slot.spec.narration, plan.pronunciations):
+                    slot.spec = slot.spec.model_copy(
+                        update={
+                            "pronunciations": {**slot.spec.pronunciations, **plan.pronunciations}
+                        }
+                    )
+                    slot.rebuild = slot.narration_changed = slot.spec_changed = True
+        classifications: dict[str, list] = {}
+        llm, planner = runtime.llm, runtime._planner()
+        # Narration first: each changed or added scene is written with its neighbours in view.
+        for index, slot in enumerate(slots):
+            prev_text = slots[index - 1].spec.narration if index else ""
+            next_text = slots[index + 1].spec.narration if index + 1 < len(slots) else ""
+            if localization_only:
+                if slot.rebuild:
+                    slot.narration_changed = True
+                continue
+            # An added scene has no words yet; a split's second half keeps its own.
+            if slot.row is None and not slot.spec.narration:
+                segment = await write_new_scene(
+                    llm,
+                    slot.request,
+                    before=prev_text,
+                    after=next_text,
+                    seconds=slot.spec.duration_target_seconds,
+                )
+                text, pauses = speakable_with_pauses(segment.narration, to_speakable)
+                slot.spec = slot.spec.model_copy(
+                    update={
+                        "narration": text,
+                        "pauses": pauses,
+                        "title": segment.title or slot.request[:60],
+                        "learning_objective": segment.learning_objective or slot.request,
+                        "equations": segment.equations,
+                        "key_terms": segment.key_terms,
+                    }
+                )
+                continue
+            if not slot.request or slot.new_text:
+                continue
+            classifications[slot.key] = await classify_feedback(planner, slot.request)
+            change = invalidation_for(classifications[slot.key][0].feedback_type, slot.request)
+            # A change that re-records the narration rewrites it first, so an audio
+            # request ("pause before each answer") can add its pause markers.
+            if change.regenerate_audio or change.root in {
                 ArtifactKind.PROFILE,
                 ArtifactKind.PEDAGOGY,
                 ArtifactKind.SCRIPT,
                 ArtifactKind.STORYBOARD,
                 ArtifactKind.SPEC,
             }:
-                spec_row.active = False
-                # Rewrite the narration to answer the request. Appending the
-                # instruction instead would make the speech engine read the
-                # request itself aloud to the student.
-                revised_narration, pauses = spec.narration, spec.pauses
-                if narration_changed:
-                    # The reviser sees the pauses as markers, so it can keep,
-                    # move or add them ("pause before each answer").
-                    revised_narration, pauses = speakable_with_pauses(
-                        await revise_narration(
-                            runtime.llm,
-                            with_markers(spec.narration, spec.pauses),
-                            instruction,
-                            learning_objective=spec.learning_objective or "",
-                        )
-                    )
-                spec = spec.model_copy(
+                slot.spec_changed = True
+                slot.revise = change.regenerate_audio
+        for index, slot in enumerate(slots):
+            if not slot.revise:
+                continue
+            # The reviser sees pauses as markers, so it can keep, move or add them.
+            text, pauses = speakable_with_pauses(
+                await revise_narration(
+                    llm,
+                    with_markers(slot.spec.narration, slot.spec.pauses),
+                    slot.request,
+                    learning_objective=slot.spec.learning_objective or "",
+                    before=slots[index - 1].spec.narration if index else "",
+                    after=slots[index + 1].spec.narration if index + 1 < len(slots) else "",
+                )
+            )
+            slot.spec = slot.spec.model_copy(update={"narration": text, "pauses": pauses})
+            slot.narration_changed = slot.new_text = True
+        # Where the order or a neighbour changed, the bridge between scenes is checked.
+        boundaries = set()
+        for index, slot in enumerate(slots):
+            old_index = before.index(slot.key) if slot.key in before else None
+            was_after = before[old_index - 1] if old_index else None
+            now_after = slots[index - 1].key if index else None
+            if slot.new_text or slot.row is None or was_after != now_after:
+                boundaries.update({index, index + 1})
+        if not localization_only:
+            fixes = await review_transitions(
+                planner, [(slot.key, slot.spec.narration) for slot in slots], sorted(boundaries)
+            )
+            for index, slot in enumerate(slots):
+                if slot.key not in fixes:
+                    continue
+                # Only the opening is rewritten; the rest of the scene is kept word for word.
+                cut = _opening_length(slot.spec.narration)
+                opening = await rewrite_opening(
+                    llm,
+                    with_markers(
+                        " ".join(sentences(slot.spec.narration)[:cut]),
+                        [pause for pause in slot.spec.pauses if pause.after_sentence < cut],
+                    ),
+                    fixes[slot.key],
+                    before=slots[index - 1].spec.narration if index else "",
+                )
+                if not opening:
+                    continue
+                slot.spec = _with_opening(slot.spec, opening)
+                slot.rebuild = slot.narration_changed = slot.spec_changed = slot.new_text = True
+        # The last scene closes the lesson; a scene that no longer does is re-tagged.
+        for index, slot in enumerate(slots):
+            closing = index == len(slots) - 1
+            if ("lesson_closing" in slot.spec.tags) != closing and slot.rebuild:
+                tags = set(slot.spec.tags) - {"lesson_closing"} | (
+                    {"lesson_closing"} if closing else set()
+                )
+                slot.spec = slot.spec.model_copy(update={"tags": sorted(tags)})
+        # New narration gets new visuals, planned for all such scenes at once.
+        replanned = [slot for slot in slots if slot.rebuild and slot.new_text]
+        if replanned:
+            blocks = [
+                NarrationBlock(
+                    block_id=slot.key,
+                    chapter_id=slot.spec.chapter_id,
+                    title=slot.spec.title,
+                    text=slot.spec.narration,
+                    learning_objective=slot.spec.learning_objective,
+                    estimated_duration_seconds=max(8.0, slot.spec.duration_target_seconds),
+                    equations=slot.spec.equations,
+                    data_plots=slot.spec.data_plots,
+                    paper_figures=slot.spec.paper_figures,
+                    key_terms=slot.spec.key_terms,
+                )
+                for slot in replanned
+            ]
+            with usage_stage("storyboard"):
+                storyboard = await plan_storyboard(planner, blocks)
+            for slot in replanned:
+                slot.spec = slot.spec.model_copy(
                     update={
-                        "version": spec.version + 1,
-                        "narration": revised_narration,
-                        "pauses": pauses,
-                        "tags": sorted(set(spec.tags + ["user_edit"])),
+                        "visual_beats": align_visual_beats(
+                            slot.spec.narration,
+                            storyboard[slot.key],
+                            slot.spec.duration_target_seconds,
+                        )
                     }
                 )
-                persist_spec = True
-            else:
-                persist_spec = False
-            artifact_version = (
+        for slot in slots:
+            if not slot.rebuild:
+                continue
+            slot.spec = slot.spec.model_copy(
+                update={
+                    "scene_id": slot.key,
+                    "version": max(slot.spec.version, saved[slot.key][0]) + 1
+                    if slot.row and slot.spec_changed
+                    else (slot.spec.version if slot.row else 1),
+                    "tags": sorted(
+                        set(slot.spec.tags) | ({"user_edit"} if slot.request else set())
+                    ),
+                }
+            )
+            if slot.request and not localization_only and slot.spec.paper_figures:
+                slot.spec = await _recheck_edited_figures(
+                    session, runtime, project_id, slot.spec, slot.request
+                )
+        rebuilt = [slot for slot in slots if slot.rebuild]
+        audio_rows = {}
+        for slot in rebuilt:
+            if slot.row is not None and not slot.narration_changed:
+                audio_rows[slot.key] = await session.scalar(
+                    select(AudioArtifact).where(
+                        AudioArtifact.scene_id == slot.row.id, AudioArtifact.active.is_(True)
+                    )
+                )
+        code_skills = await runtime.skills.context_for("code")
+        gate = asyncio.Semaphore(max(1, settings.max_concurrent_scenes))
+
+        def artifact_version(slot: _EditSlot) -> int:
+            if slot.row is None:
+                return 1
+            row = slot.row
+            return (
                 max(
-                    scene.active_code_version,
-                    scene.active_audio_version,
-                    scene.active_render_version,
+                    row.active_code_version,
+                    row.active_audio_version,
+                    row.active_render_version,
+                    saved[slot.key][1],
                 )
                 + 1
             )
-            existing_audio = None
-            if not narration_changed:
-                audio_row = await session.scalar(
-                    select(AudioArtifact).where(
-                        AudioArtifact.scene_id == scene.id, AudioArtifact.active.is_(True)
-                    )
+
+        async def produce(slot: _EditSlot):
+            audio_row = audio_rows.get(slot.key)
+            async with gate:
+                return await runtime.produce_scene(
+                    str(project_id),
+                    slot.spec,
+                    artifact_version=artifact_version(slot),
+                    persist_spec=slot.spec_changed or slot.row is None,
+                    existing_audio=(
+                        TTSResult(
+                            audio_path=audio_row.uri,
+                            duration_seconds=audio_row.duration,
+                            sentence_timings=audio_row.timings,
+                            word_timings=[],
+                        )
+                        if audio_row is not None
+                        else None
+                    ),
+                    # A scene edit keeps its grounded source set, so citations stay valid.
+                    known_source_ids=set(slot.spec.source_ids),
+                    prefetched_corrections=[],
+                    code_skill_context=code_skills,
+                    # The reviewer checks that the requested change is really there.
+                    edit_request=""
+                    if localization_only
+                    else (f"New scene: {slot.request}" if slot.row is None else slot.request),
                 )
-                if audio_row:
-                    existing_audio = TTSResult(
-                        audio_path=audio_row.uri,
-                        duration_seconds=audio_row.duration,
-                        sentence_timings=audio_row.timings,
-                        word_timings=[],
-                    )
-            if not localization_only:
-                spec = await _recheck_edited_figures(
-                    session, runtime, project_id, spec, instruction
+
+        produced_scenes = await asyncio.gather(*(produce(slot) for slot in rebuilt))
+        chapter_id = next((slot.row.chapter_id for slot in slots if slot.row), None)
+        for slot, produced in zip(rebuilt, produced_scenes, strict=True):
+            version = artifact_version(slot)
+            if slot.row is None:
+                slot.row = Scene(
+                    project_id=project_id,
+                    chapter_id=chapter_id,
+                    scene_key=slot.key,
+                    title=slot.spec.title[:300],
+                    order_index=0,
+                    status="COMPLETE",
+                    active_spec_version=slot.spec.version,
+                    timeline_start=0,
+                    timeline_end=0,
                 )
-            produced = await runtime.produce_scene(
-                str(project_id),
-                spec,
-                artifact_version=artifact_version,
-                persist_spec=persist_spec,
-                existing_audio=existing_audio,
-                # A scene edit preserves its original grounded source set. If
-                # these IDs are omitted, verification treats every citation as
-                # unknown and blocks otherwise valid regeneration attempts.
-                known_source_ids=set(spec.source_ids),
-                # The code model sees what the learner asked for, not only the plan.
-                edit_request="" if localization_only else instruction,
-            )
-            old_code = await session.scalar(
-                select(GeneratedCode).where(
-                    GeneratedCode.scene_id == scene.id, GeneratedCode.active.is_(True)
+                session.add(slot.row)
+                await session.flush()
+            scene = slot.row
+            scene.title = slot.spec.title[:300] or scene.title
+            for model in (GeneratedCode, RenderArtifact) + (
+                (AudioArtifact,) if slot.narration_changed else ()
+            ):
+                old = await session.scalar(
+                    select(model).where(model.scene_id == scene.id, model.active.is_(True))
                 )
-            )
-            old_render = await session.scalar(
-                select(RenderArtifact).where(
-                    RenderArtifact.scene_id == scene.id, RenderArtifact.active.is_(True)
-                )
-            )
-            if old_code:
-                old_code.active, old_code.stale = False, True
-            if old_render:
-                old_render.active, old_render.stale = False, True
-            if narration_changed:
-                old_audio = await session.scalar(
-                    select(AudioArtifact).where(
-                        AudioArtifact.scene_id == scene.id, AudioArtifact.active.is_(True)
-                    )
-                )
-                if old_audio:
-                    old_audio.active, old_audio.stale = False, True
+                if old:
+                    old.active, old.stale = False, True
+            if slot.narration_changed:
                 session.add(
                     AudioArtifact(
                         scene_id=scene.id,
-                        version=artifact_version,
-                        narration_version=spec.version,
+                        version=version,
+                        narration_version=slot.spec.version,
                         uri=produced.audio.audio_path,
                         duration=produced.audio.duration_seconds,
                         timings=[cue.model_dump() for cue in produced.audio.sentence_timings],
                     )
                 )
-                scene.active_audio_version = artifact_version
-                scene.duration = media_duration(
-                    produced.audio.duration_seconds, produced.video_duration_seconds
+                scene.active_audio_version = version
+            if slot.spec_changed:
+                old_spec = await session.scalar(
+                    select(SceneSpecification).where(
+                        SceneSpecification.scene_id == scene.id,
+                        SceneSpecification.active.is_(True),
+                    )
                 )
-            if persist_spec:
+                if old_spec:
+                    old_spec.active = False
                 session.add(
                     SceneSpecification(
                         scene_id=scene.id,
-                        version=spec.version,
-                        payload=spec.model_dump(mode="json"),
-                        uri=f"{project_id}/scenes/{scene.scene_key}/spec/v{spec.version}.json",
+                        version=slot.spec.version,
+                        payload=slot.spec.model_dump(mode="json"),
+                        uri=f"{project_id}/scenes/{slot.key}/spec/v{slot.spec.version}.json",
                     )
                 )
-                scene.active_spec_version = spec.version
+                scene.active_spec_version = slot.spec.version
             session.add(
                 GeneratedCode(
                     scene_id=scene.id,
-                    version=artifact_version,
-                    spec_version=spec.version,
+                    version=version,
+                    spec_version=slot.spec.version,
                     uri=produced.code_path,
-                    scene_class=f"Scene{scene.scene_key}",
+                    scene_class=f"Scene{slot.key}",
                 )
             )
             session.add(
                 RenderArtifact(
                     scene_id=scene.id,
                     version=produced.render_version,
-                    code_version=artifact_version,
+                    code_version=version,
                     audio_version=scene.active_audio_version,
                     uri=produced.render_path,
-                    metadata_json={"edit": instruction},
+                    metadata_json={"edit": slot.request or plan.summary},
                 )
             )
-            scene.active_code_version = artifact_version
+            scene.active_code_version = version
             scene.active_render_version = produced.render_version
             scene.status = "COMPLETE"
             for previous in (
@@ -1548,7 +1923,7 @@ async def edit_range(
                 SceneVersion(
                     scene_id=scene.id,
                     version=next_version,
-                    reason=instruction,
+                    reason=slot.request or plan.summary or "edit",
                     snapshot={
                         "spec_version": scene.active_spec_version,
                         "code_version": scene.active_code_version,
@@ -1557,34 +1932,41 @@ async def edit_range(
                     },
                 )
             )
-            for result in classifications:
+            folder = getattr(runtime, "correction_folder", None)
+            for result in classifications.get(slot.key, []):
                 session.add(
                     FeedbackEvent(
                         project_id=project_id,
-                        scene_ids=[scene.scene_key],
+                        scene_ids=[slot.key],
                         feedback_type=result.feedback_type.value,
                         category=result.category,
-                        instruction=instruction,
+                        instruction=slot.request,
                         range_start=start,
                         range_end=end,
                     )
                 )
-                folder = getattr(runtime, "correction_folder", None)
                 if result.memory_eligible and folder is not None:
                     # A learner's complaint counts as one case toward a lesson.
                     folder.record(
                         "code",
                         result.category or "learner-feedback",
-                        instruction,
+                        slot.request,
                         "Changed the scene as the learner asked.",
-                        scene=f"{project_id}/{scene.scene_key}",
+                        scene=f"{project_id}/{slot.key}",
                     )
+        kept = {slot.key for slot in slots}
+        for scene in scenes:
+            if scene.scene_key not in kept:
+                scene.timeline_start = scene.timeline_end = None
+        ordered = [slot.row for slot in slots]
+        for index, scene in enumerate(ordered, 1):
+            scene.order_index = index
         await session.flush()
         render_paths: list[str] = []
         audio_paths: list[str] = []
         scene_cues: list[tuple[float, list[TimingCue]]] = []
         cue_offset = 0.0
-        for scene in scenes:
+        for scene in ordered:
             render = await session.scalar(
                 select(RenderArtifact).where(
                     RenderArtifact.scene_id == scene.id, RenderArtifact.active.is_(True)
@@ -1622,7 +2004,7 @@ async def edit_range(
         timeline = build_timeline(
             [
                 (scene.scene_key, scene.duration, scene.active_render_version, path)
-                for scene, path in zip(scenes, render_paths)
+                for scene, path in zip(ordered, render_paths, strict=True)
             ]
         )
         runtime._json(f"{project_id}/video/v{video_version}/timeline.json", timeline)
@@ -1667,7 +2049,7 @@ async def edit_range(
                 ),
             ]
         )
-        for segment, scene in zip(timeline.scenes, scenes):
+        for segment, scene in zip(timeline.scenes, ordered, strict=True):
             scene.timeline_start, scene.timeline_end = segment.start, segment.end
             session.add(
                 TimelineSegment(
@@ -1690,21 +2072,32 @@ async def edit_range(
         ).all():
             revision.active = False
         project.active_revision += 1
+        affected_keys = [slot.key for slot in rebuilt]
         session.add(
             ProjectRevision(
                 project_id=project_id,
                 version=project.active_revision,
                 reason="timestamp_edit",
                 payload={
-                    "instruction": instruction,
+                    "instruction": plan.summary,
+                    "edits": [edit.model_dump() for edit in plan.edits],
+                    "pronunciations": plan.pronunciations,
                     "affected_scenes": affected_keys,
+                    "removed_scenes": [key for key in before if key not in kept],
+                    "scene_order": [slot.key for slot in slots],
                     "video_version": video_version,
                 },
                 active=True,
             )
         )
         await record_event(
-            session, project_id, "video.complete", detail={"selectively_regenerated": affected_keys}
+            session,
+            project_id,
+            "video.complete",
+            detail={
+                "selectively_regenerated": affected_keys,
+                "scene_order": [slot.key for slot in slots],
+            },
         )
         await session.commit()
         return affected_keys
@@ -1973,6 +2366,10 @@ async def activate_video_version(session, project: Project, version: int) -> boo
         scene.active_audio_version = chosen[AudioArtifact]
         scene.active_render_version = chosen[RenderArtifact]
         scene.timeline_start, scene.timeline_end = segment.start_seconds, segment.end_seconds
+    # That version's scene order, which a later edit may have changed.
+    for index, segment in enumerate(sorted(segments, key=lambda item: item.start_seconds), 1):
+        scene = await session.get(Scene, segment.scene_id)
+        scene.order_index = index
     # Scenes that version did not have are not part of the restored video.
     in_version = {segment.scene_id for segment in segments}
     for scene in (await session.scalars(select(Scene).where(Scene.project_id == project.id))).all():
