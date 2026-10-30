@@ -419,6 +419,7 @@ async def test_an_edit_rebuilds_only_its_scenes_and_saves_one_new_version(
     async with database.sessions() as session:
         rows = {s.scene_key: s for s in (await session.scalars(select(Scene))).all()}
         assert rows["S02"].timeline_start is None
+        assert rows["S01"].verification_state == rows["S04"].verification_state == "PASSED"
         current = sorted(
             (s for s in rows.values() if s.timeline_start is not None), key=lambda s: s.order_index
         )

@@ -362,17 +362,51 @@ def _read_log(path: str | None) -> str:
 
 
 def _attempt_rank(
-    report: VerificationReport, checklist_score: float | None = None
-) -> tuple[int, int, float, float]:
-    """Sort key for attempts: fewest critical, then high issues, then the reviewer's
-    checklist score, then the overall score. Lower is better; ties keep the earlier."""
+    report: VerificationReport, checklist_score: float | None = None, off_frame: int = 0
+) -> tuple[int, int, int, float, float]:
+    """Sort key for attempts: fewest critical, then high issues, then fewest objects
+    measured outside the frame, then the reviewer's checklist score, then the overall
+    score. Lower is better; ties keep the earlier.
+
+    The measurement settles what a reviewer can only estimate: of two attempts
+    failing one must-pass item each, the one whose labels are inside the frame wins.
+    """
     severities = [issue.severity for issue in report.issues]
     return (
         severities.count("critical"),
         severities.count("high"),
+        off_frame,
         -(checklist_score or 0.0),
         -report.score,
     )
+
+
+def review_cues(timings, pauses, narration: str) -> list[tuple[float, float, str]]:
+    """Sentence timings for the reviewer, with each planned pause shown as its own silence.
+
+    A pause is spliced into the audio after its sentence, which stretches that
+    sentence's cue; listed that way the reviewer hears "Blue is short." run on
+    to the next sentence and reports the pause the learner asked for as missing.
+    """
+    silences = {
+        pause.after_sentence: pause.seconds
+        for pause in map_pauses(pauses, len(sentences(narration)), len(timings))
+    }
+    cues: list[tuple[float, float, str]] = []
+    for index, cue in enumerate(timings):
+        seconds = silences.get(index, 0.0)
+        if seconds and cue.end - cue.start > seconds:
+            cues.append((cue.start, cue.end - seconds, cue.text))
+            cues.append(
+                (
+                    cue.end - seconds,
+                    cue.end,
+                    f"(planned {seconds:g}s silence: the teacher's deliberate pause, no speech)",
+                )
+            )
+        else:
+            cues.append((cue.start, cue.end, cue.text))
+    return cues
 
 
 # Layout faults are placement problems: something overlaps, sits too low, or is
@@ -1394,7 +1428,7 @@ class ScholarMotionPipeline:
                         objective=display_spec.learning_objective,
                         tags=display_spec.tags,
                         narration=spoken_narration,
-                        cues=[(cue.start, cue.end, cue.text) for cue in audio.sentence_timings],
+                        cues=review_cues(audio.sentence_timings, spec.pauses, spec.narration),
                         source_code=generated.python_code,
                         notes="\n".join(self._corrections("review", scene_terms)),
                         extra=review_extra,
@@ -1564,7 +1598,11 @@ class ScholarMotionPipeline:
             checklist_score = (
                 min(entry["score"] for entry in checklist_scores) if checklist_scores else None
             )
-            rank = _attempt_rank(report, checklist_score)
+            off_frame = sum(
+                issue.category == "layout.out_of_frame"
+                for issue in [*geometry_hints, *layers.get("layout", [])]
+            )
+            rank = _attempt_rank(report, checklist_score, off_frame)
             # When every attempt fails, ship the best one, not the latest.
             if (
                 result.video_path

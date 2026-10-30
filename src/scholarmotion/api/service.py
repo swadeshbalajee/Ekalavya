@@ -1905,6 +1905,7 @@ async def edit_range(
             scene.active_code_version = version
             scene.active_render_version = produced.render_version
             scene.status = "COMPLETE"
+            scene.verification_state = "PASSED" if produced.report.passed else "DEGRADED"
             for previous in (
                 await session.scalars(
                     select(SceneVersion).where(

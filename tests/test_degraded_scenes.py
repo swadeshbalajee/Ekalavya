@@ -11,11 +11,12 @@ from __future__ import annotations
 import pytest
 
 from scholarmotion.media.ffmpeg import FFmpegAssembler
-from scholarmotion.schemas import VerificationIssue, VerificationReport
+from scholarmotion.schemas import Pause, TimingCue, VerificationIssue, VerificationReport
 from scholarmotion.services.orchestration import (
     _attempt_rank,
     _only_cosmetic,
     _reject_empty_lesson,
+    review_cues,
 )
 
 
@@ -90,6 +91,34 @@ def test_best_attempt_has_fewest_serious_issues_then_highest_score():
         _report(0.7, "high"),
     ]
     assert min(attempts, key=_attempt_rank).score == 0.7
+
+
+def test_of_equal_attempts_the_one_measured_inside_the_frame_ships():
+    # The sky lesson's v7 (labels past the right edge) and v9 (inside) each
+    # failed one must-pass item with the same checklist score.
+    clipped, inside = _report(0.7, "high"), _report(0.7, "high")
+    ranked = sorted(
+        [(clipped, 2), (inside, 0)], key=lambda item: _attempt_rank(item[0], 0.893, item[1])
+    )
+    assert ranked[0][0] is inside
+
+
+def test_the_reviewer_sees_a_planned_pause_as_its_own_silence():
+    timings = [
+        TimingCue(start=4.91, end=6.93, text="Each color has its own wavelength."),
+        TimingCue(start=6.93, end=10.15, text="Blue is short."),
+        TimingCue(start=10.15, end=11.38, text="Red is long."),
+    ]
+    narration = "Each color has its own wavelength. Blue is short. Red is long."
+    cues = review_cues(timings, [Pause(after_sentence=1, seconds=2)], narration)
+    assert [(round(a, 2), round(b, 2)) for a, b, _ in cues] == [
+        (4.91, 6.93),
+        (6.93, 8.15),
+        (8.15, 10.15),
+        (10.15, 11.38),
+    ]
+    assert cues[1][2] == "Blue is short." and "planned 2s silence" in cues[2][2]
+    assert review_cues(timings, [], narration) == [(c.start, c.end, c.text) for c in timings]
 
 
 def test_a_partial_lesson_is_published_when_some_scenes_exist():
