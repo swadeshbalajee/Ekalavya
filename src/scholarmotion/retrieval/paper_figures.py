@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -23,6 +24,9 @@ _CAPTION = re.compile(r"(?m)^\s*(Figure|Fig\.)\s*(\d+)\s*[:.|–—]")
 _PATH, _IMAGE, _FORM = 2, 3, 5
 RENDER_SCALE = 3.0
 MIN_FIGURE_POINTS = 40.0
+# PDFium is not thread-safe: figure checks render pages from several threads at
+# once, and overlapping calls corrupted memory and killed the worker process.
+_PDFIUM = threading.Lock()
 
 
 @dataclass
@@ -93,6 +97,11 @@ def extract_figures(
 
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
+    with _PDFIUM:
+        return _extract_figures(pdfium, pdf_path, output, labels)
+
+
+def _extract_figures(pdfium, pdf_path, output: Path, labels: set[str] | None) -> list[FigureCrop]:
     document = pdfium.PdfDocument(str(pdf_path))
     crops: list[FigureCrop] = []
     seen: set[str] = set()
@@ -157,11 +166,12 @@ def render_page(pdf_path: str | Path, page: int, *, scale: float = 1.5) -> bytes
 
     import pypdfium2 as pdfium
 
-    document = pdfium.PdfDocument(str(pdf_path))
-    try:
-        image = document[page - 1].render(scale=scale).to_pil()
-    finally:
-        document.close()
+    with _PDFIUM:
+        document = pdfium.PdfDocument(str(pdf_path))
+        try:
+            image = document[page - 1].render(scale=scale).to_pil()
+        finally:
+            document.close()
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
@@ -177,17 +187,18 @@ def crop_page_region(
     x0, y0, x1, y1 = (min(1.0, max(0.0, float(value))) for value in box)
     if x1 <= x0 or y1 <= y0:
         raise ValueError(f"empty figure box {box}")
-    document = pdfium.PdfDocument(str(pdf_path))
-    try:
-        page = document[crop.page - 1]
-        width, height = page.get_size()
-        # PDFium crops are margins from the left, bottom, right and top edges.
-        image = page.render(
-            scale=RENDER_SCALE,
-            crop=(x0 * width, (1 - y1) * height, (1 - x1) * width, y0 * height),
-        ).to_pil()
-    finally:
-        document.close()
+    with _PDFIUM:
+        document = pdfium.PdfDocument(str(pdf_path))
+        try:
+            page = document[crop.page - 1]
+            width, height = page.get_size()
+            # PDFium crops are margins from the left, bottom, right and top edges.
+            image = page.render(
+                scale=RENDER_SCALE,
+                crop=(x0 * width, (1 - y1) * height, (1 - x1) * width, y0 * height),
+            ).to_pil()
+        finally:
+            document.close()
     image.save(crop.path)
     return FigureCrop(
         label=crop.label,

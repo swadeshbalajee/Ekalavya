@@ -174,3 +174,37 @@ async def test_an_edit_crops_its_figures_again_and_checks_them_with_the_request(
     assert figures["Figure 3"].width == pytest.approx(600 * 0.8 * 3, abs=3)  # re-cropped
     assert figures["Figure 9"].width == 7  # not found again, so kept as it was
     assert events[0][0] == "paper.figures" and events[0][1]["checks"] == {"Figure 3": "recropped"}
+
+
+def test_pdf_pages_are_never_rendered_from_two_threads_at_once(tmp_path, monkeypatch):
+    # PDFium is not thread-safe; overlapping renders crashed the worker process.
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from scholarmotion.retrieval.paper_figures import render_page
+
+    path = _pdf(tmp_path)
+    real, lock = pdfium.PdfDocument, threading.Lock()
+    state = {"open": 0, "most": 0}
+
+    def tracked(*args, **kwargs):
+        with lock:
+            state["open"] += 1
+            state["most"] = max(state["most"], state["open"])
+        time.sleep(0.02)
+        document = real(*args, **kwargs)
+        close = document.close
+
+        def closed():
+            close()
+            with lock:
+                state["open"] -= 1
+
+        document.close = closed
+        return document
+
+    monkeypatch.setattr(pdfium, "PdfDocument", tracked)
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        pages = list(pool.map(lambda _: render_page(path, 1), range(12)))
+    assert all(pages) and state["most"] == 1
