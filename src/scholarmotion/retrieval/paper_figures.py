@@ -1,7 +1,7 @@
 """Crop a paper's own figures out of its PDF so scenes can show them.
 
 A figure is located by its caption ("Figure 3:" / "Fig. 3."): the graphics
-(embedded images and vector paths) between that caption and the caption or
+(embedded images, vector paths and grouped forms) between that caption and the caption or
 page edge above it form the figure, together with the sub-labels just above
 the caption. The crop is rendered at high resolution as a PNG.
 """
@@ -15,9 +15,12 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_CAPTION = re.compile(r"(?m)^\s*(Figure|Fig\.)\s*(\d+)\s*[:.]")
-# PDFium page object types.
-_PATH, _IMAGE = 2, 3
+# "Figure 3:", "Fig. 3.", and the "Figure 3 | ..." or "Figure 3 — ..." styles of
+# some templates. A sentence like "Figure 3 shows" is a reference, not a caption.
+_CAPTION = re.compile(r"(?m)^\s*(Figure|Fig\.)\s*(\d+)\s*[:.|–—]")
+# PDFium page object types. A form groups other objects; some papers embed a
+# whole figure as one form.
+_PATH, _IMAGE, _FORM = 2, 3, 5
 RENDER_SCALE = 3.0
 MIN_FIGURE_POINTS = 40.0
 
@@ -67,7 +70,7 @@ def _graphics(page) -> list[tuple[float, float, float, float]]:
     width, height = page.get_size()
     boxes = []
     for obj in page.get_objects():
-        if obj.type not in (_PATH, _IMAGE):
+        if obj.type not in (_PATH, _IMAGE, _FORM):
             continue
         left, bottom, right, top = obj.get_bounds()
         # Running headers/footers (and their rules) live in the page margins.
