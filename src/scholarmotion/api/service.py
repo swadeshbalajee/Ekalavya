@@ -1746,6 +1746,7 @@ async def edit_range(
                     learning_objective=slot.spec.learning_objective or "",
                     before=slots[index - 1].spec.narration if index else "",
                     after=slots[index + 1].spec.narration if index + 1 < len(slots) else "",
+                    is_closing=index + 1 == len(slots),
                 )
             )
             slot.spec = slot.spec.model_copy(update={"narration": text, "pauses": pauses})

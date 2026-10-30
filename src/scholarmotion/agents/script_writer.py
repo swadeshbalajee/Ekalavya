@@ -701,6 +701,7 @@ async def revise_narration(
     learning_objective: str = "",
     before: str = "",
     after: str = "",
+    is_closing: bool = False,
 ) -> str:
     """Rewrite narration to satisfy a student's clarification request.
 
@@ -710,7 +711,9 @@ async def revise_narration(
     """
     prompt = (
         f"{REVISION_RULES}\n\n"
-        f"Learning objective: {learning_objective or '(unchanged)'}\n\n"
+        # The last scene keeps the lesson's ending through a rewrite.
+        + (f"This is the last scene of the lesson.\n{NATURAL_ENDING}\n\n" if is_closing else "")
+        + f"Learning objective: {learning_objective or '(unchanged)'}\n\n"
         f"STUDENT'S REQUEST:\n{instruction}\n\n"
         + (
             "The lesson around this scene (keep it connected: follow on from the first and "

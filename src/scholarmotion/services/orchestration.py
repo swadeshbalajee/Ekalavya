@@ -2195,6 +2195,7 @@ class ScholarMotionPipeline:
                     with_markers(scene.spec.narration, scene.spec.pauses),
                     "A reviewer of the whole lesson found a problem in this part. " + fix,
                     learning_objective=scene.spec.learning_objective or "",
+                    is_closing=scene is scenes[-1],
                 )
             )
             if narration.strip() == scene.spec.narration.strip() and pauses == scene.spec.pauses:

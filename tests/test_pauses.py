@@ -121,6 +121,23 @@ async def test_an_edit_can_add_pauses_through_the_reviser():
 
 
 @pytest.mark.asyncio
+async def test_rewriting_the_last_scene_keeps_the_lesson_ending():
+    prompts = []
+
+    class Reviser:
+        name = "openai_compatible"
+
+        async def generate_text(self, prompt):
+            prompts.append(prompt)
+            return "A recap. Thanks for learning with me."
+
+    await revise_narration(Reviser(), "Practice.", "more depth", is_closing=True)
+    await revise_narration(Reviser(), "Practice.", "more depth")
+    assert "ENDING:" in prompts[0] and "last scene" in prompts[0]
+    assert "ENDING:" not in prompts[1]
+
+
+@pytest.mark.asyncio
 async def test_the_script_review_gets_one_polish_pass_for_minor_notes():
     calls = []
 
