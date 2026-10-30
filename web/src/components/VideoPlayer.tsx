@@ -10,6 +10,18 @@ export type PlayerHandle = {
   element: () => HTMLVideoElement | null;
 };
 
+const SPEEDS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+const SPEED_KEY = "ekalavya-playback-speed";
+
+function savedSpeed(): number {
+  try {
+    const value = Number(localStorage.getItem(SPEED_KEY));
+    return SPEEDS.includes(value) ? value : 1;
+  } catch {
+    return 1;
+  }
+}
+
 type Props = {
   videoId: string;
   version?: number | null;
@@ -39,6 +51,7 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
 ) {
   const video = useRef<HTMLVideoElement>(null);
   const [now, setNow] = useState(0);
+  const [speed, setSpeed] = useState(savedSpeed);
   const pin = version ? { version } : {};
   useImperativeHandle(ref, () => ({
     seek: (seconds, play = true) => {
@@ -60,6 +73,16 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
     else element.addEventListener("loadedmetadata", seek, { once: true });
   }, [startAt, videoId, version]);
 
+  // A new source resets the element's rate, so apply the chosen speed on every load.
+  useEffect(() => {
+    if (video.current) video.current.playbackRate = speed;
+    try {
+      localStorage.setItem(SPEED_KEY, String(speed));
+    } catch {
+      /* not remembered */
+    }
+  }, [speed, videoId, version]);
+
   const total = Math.max(...chapters.map((chapter) => chapter.end || 0), 0);
   const active = chapters.findIndex((chapter) => now >= chapter.start && now < chapter.end);
 
@@ -73,6 +96,14 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
         preload="metadata"
         crossOrigin="anonymous"
         className="aspect-video w-full rounded-2xl bg-black shadow-card"
+        onLoadedMetadata={(event) => {
+          event.currentTarget.playbackRate = speed;
+        }}
+        // The browser's own menu can change the rate too; keep the buttons in step.
+        onRateChange={(event) => {
+          const rate = event.currentTarget.playbackRate;
+          if (SPEEDS.includes(rate)) setSpeed(rate);
+        }}
         onTimeUpdate={(event) => {
           const element = event.currentTarget;
           setNow(element.currentTime);
@@ -95,8 +126,24 @@ export const VideoPlayer = forwardRef<PlayerHandle, Props>(function VideoPlayer(
           default
         />
       </video>
+      <div className="mt-2 flex items-center justify-end gap-1" role="group" aria-label="Playback speed">
+        <span className="mr-1 text-xs text-muted">Speed</span>
+        {SPEEDS.map((value) => (
+          <button
+            key={value}
+            onClick={() => setSpeed(value)}
+            aria-pressed={speed === value}
+            className={clsx(
+              "rounded-lg px-2 py-0.5 font-mono text-xs transition",
+              speed === value ? "bg-primary/15 text-ink" : "text-ink-2 hover:bg-raised hover:text-ink",
+            )}
+          >
+            {value}×
+          </button>
+        ))}
+      </div>
       {showChapterStrip && total > 0 && chapters.length > 1 && (
-        <div className="mt-3 flex h-2 gap-[3px]" aria-label="Scenes">
+        <div className="mt-2 flex h-2 gap-[3px]" aria-label="Scenes">
           {chapters.map((chapter, index) => (
             <button
               key={chapter.scene_id + index}
