@@ -157,7 +157,7 @@ The first build takes about 10–15 minutes. It installs Manim, LaTeX, FFmpeg, C
 
 **Stopping and data:**
 - `Ctrl+C` or `docker compose down` stops the stack.
-- Chats and accounts stay in Docker volumes, and videos in `./projects`. Both survive restarts.
+- Chats and accounts stay in Docker volumes, and videos in `./projects` (or `PROJECTS_DIR`), one folder per user: `<owner_id>/<project_id>/`. Both survive restarts.
 - `docker compose down -v` also deletes your chats.
 - `docker compose logs -f worker` follows the lesson pipeline.
 - For a smaller image without LaTeX, run `docker compose build --build-arg WITH_LATEX=0`. Equations then render as Unicode text.
@@ -199,9 +199,9 @@ Click **Create account**, sign in, and try:
 
 ## Configuration
 
-All settings live in `.env`. [.env.example](.env.example) documents every variable. Each capability (main LLM, planner, code, translation, vision, video review, TTS, STT, embeddings) is configured independently, with an optional fallback model. Leave a capability blank to use deterministic mocks, which are useful for offline tests.
+All settings live in `.env`. [.env.example](.env.example) documents every variable. Each capability (main LLM, planner, code, translation, vision, video review, TTS, STT, embeddings) is configured independently, with an optional fallback model. Set a capability's provider to `mock` (or leave it blank) to use deterministic mocks, which are useful for offline tests.
 
-The reference setup uses a single OpenRouter key:
+`.env.example` ships with the reference setup below, so on a new machine you only need to fill in `OPENROUTER_API_KEY` (and `APP_API_KEY` if you don't run `setup-local.ps1`):
 
 ```dotenv
 APP_API_KEY=<any random string>

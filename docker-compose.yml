@@ -14,7 +14,7 @@ x-app: &app
     TEMPORAL_ADDRESS: temporal:7233
     OBJECT_STORAGE_ROOT: /app/projects
   volumes:
-    - ./projects:/app/projects
+    - ${PROJECTS_DIR:-./projects}:/app/projects
     - model-cache:/cache/huggingface
   restart: unless-stopped
 

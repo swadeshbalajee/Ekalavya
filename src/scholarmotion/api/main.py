@@ -666,6 +666,7 @@ async def create_project(
     )
     session.add(project)
     await session.flush()
+    store.assign_project(project.id, project.owner_id)
     session.add(
         ProjectRevision(
             project_id=project.id,
@@ -785,6 +786,7 @@ async def copy_project(project_id: UUID, payload: ProjectCopyRequest, session: S
     )
     session.add(copied)
     await session.flush()
+    store.assign_project(copied.id, copied.owner_id)
     session.add(
         ProjectRevision(
             project_id=copied.id,

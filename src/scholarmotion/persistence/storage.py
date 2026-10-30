@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path, PurePosixPath
 from typing import Protocol
+from uuid import UUID
 
 
 class ObjectStore(Protocol):
@@ -21,13 +22,48 @@ def safe_key(key: str) -> str:
     return str(path)
 
 
+def _project_id(segment: str) -> str | None:
+    try:
+        return segment if str(UUID(segment)) == segment else None
+    except ValueError:
+        return None
+
+
 class LocalObjectStore:
+    """Files on local disk, one folder per user: ``<root>/<owner_id>/<project_id>/``.
+
+    Keys stay ``<project_id>/...``; the store finds the owner's folder, which
+    ``assign_project`` creates when the project is created. A project with no
+    owner folder (no owner, or created before per-user storage) stays at
+    ``<root>/<project_id>/``.
+    """
+
     def __init__(self, root: str | Path):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        self._project_dirs: dict[str, Path] = {}
+
+    def assign_project(self, project_id: UUID | str, owner_id: UUID | str | None) -> None:
+        if owner_id is None:
+            return
+        folder = self.root / str(owner_id) / str(project_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        self._project_dirs[str(project_id)] = folder
+
+    def _project_dir(self, project_id: str) -> Path:
+        if project_id in self._project_dirs:
+            return self._project_dirs[project_id]
+        owned = next((path for path in self.root.glob(f"*/{project_id}") if path.is_dir()), None)
+        if owned is None:
+            return self.root / project_id
+        self._project_dirs[project_id] = owned
+        return owned
 
     def _path(self, key: str) -> Path:
-        candidate = (self.root / safe_key(key)).resolve()
+        head, _, rest = safe_key(key).partition("/")
+        project_id = _project_id(head)
+        base = self._project_dir(project_id) if project_id else self.root / head
+        candidate = (base / rest).resolve() if rest else base.resolve()
         if self.root != candidate and self.root not in candidate.parents:
             raise ValueError("object escaped storage root")
         return candidate
