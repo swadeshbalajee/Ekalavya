@@ -26,8 +26,8 @@ CHECKLIST: tuple[CheckItem, ...] = (
     CheckItem(
         "text_overlap",
         "must",
-        "No text, label or number overlaps other text, a shape, a bar or a line on settled "
-        "frames (brief overlap while something moves is fine).",
+        "No text, label or number overlaps other text, a shape, a bar or a line once the "
+        "picture has settled. Anything fading in or out, moving or transforming does not count.",
     ),
     CheckItem(
         "in_frame",

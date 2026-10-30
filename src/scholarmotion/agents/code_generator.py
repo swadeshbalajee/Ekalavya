@@ -688,6 +688,7 @@ async def generate_scene_code(
     previous_code: str = "",
     edit_request: str = "",
     review_frames: list[bytes] | None = None,
+    previous_code_note: str = "",
 ) -> GeneratedSceneCode:
     scene_class = scene_class_name(spec.scene_id)
     context = "\n".join(corrections or [])
@@ -721,14 +722,27 @@ async def generate_scene_code(
             f"{figure.label}: paper_figure({figure.filename!r}) is {figure.width}x{figure.height} "
             f"px. Caption: {figure.caption}"
             + (f" Point at, in order: {figure.focus}" if figure.focus else "")
+            + _measured_regions(figure)
             for figure in spec.paper_figures
         )
         + "\nShow each with paper_figure(filename, region); never redraw it. Point at parts with "
         "figure_region(image, x0, y0, x1, y1) boxes and figure_point(image, fx, fy) arrows, "
-        "using fractions of the image measured from its top-left corner. The attached copy has "
-        "a pink grid with lines every 0.1 (labels along the top for x, the left for y; the grid "
-        "is not in the video): read each part's x0, y0, x1, y1 off that grid so every box "
-        "surrounds exactly the part the voice names, not a legend or neighbouring panel. Move the "
+        "using fractions of the image measured from its top-left corner. "
+        + (
+            "Where MEASURED HIGHLIGHTS are listed, use exactly those calls and show each while "
+            "the voice names that part. "
+            if any(figure.regions for figure in spec.paper_figures)
+            else ""
+        )
+        + (
+            "Figures without measured highlights are attached with a pink grid with lines every "
+            "0.1 (labels along the top for x, the left for y; the grid is not in the video): read "
+            "each part's x0, y0, x1, y1 off that grid so every box surrounds exactly the part the "
+            "voice names, not a legend or neighbouring panel. "
+            if not all(figure.regions for figure in spec.paper_figures)
+            else ""
+        )
+        + "Move the "
         "highlight as the narration moves; keep the figure large (main region) while it is "
         "being explained, and shrink it to the left region only to show an equation beside "
         "it. Put the label badge (e.g. 'Figure 1') next_to the image.\n\n"
@@ -830,17 +844,27 @@ async def generate_scene_code(
             else ""
         )
         + (
-            "FAILED SOURCE TO REPAIR:\n"
+            (
+                f"BEST VERSION SO FAR ({previous_code_note}):\n"
+                if previous_code_note
+                else "FAILED SOURCE TO REPAIR:\n"
+            )
             + previous_code
-            + "\nRepair this actual source using the observed findings. Preserve correct content and "
-            "timing; fix the root cause rather than rebuilding an unrelated scene. Check whether "
-            "a referenced variable is actually used on screen. Matrix row indices increase downward: "
-            "prefer Manim Matrix/MobjectMatrix or y=(middle-row)*UP, never a vertically flipped grid.\n"
+            + (
+                "\nIt does not pass yet. Reuse whatever in it works; change or rewrite any part of "
+                "it, or all of it, if that is the better way to pass every check. "
+                if previous_code_note
+                else "\nRepair this actual source using the observed findings. Preserve correct "
+                "content and timing; fix the root cause rather than rebuilding an unrelated scene. "
+            )
+            + "Check whether a referenced variable is actually used on screen. Matrix row indices "
+            "increase downward: prefer Manim Matrix/MobjectMatrix or y=(middle-row)*UP, never a "
+            "vertically flipped grid.\n"
             if previous_code
             else ""
         )
         + (
-            f"The last {len(review_frames)} attached pictures are stills of that failed render, "
+            f"The last {len(review_frames)} attached pictures are stills of that version's render, "
             "in time order, as the reviewer saw them. Find each reported problem in them.\n"
             if review_frames and previous_code
             else ""
@@ -899,15 +923,40 @@ async def generate_scene_code(
     )
 
 
-def _figure_images(spec: SceneSpec) -> list[bytes]:
-    """The paper figures with a coordinate grid, so highlight boxes land on target.
+def _measured_regions(figure) -> str:
+    """The located parts of a figure as ready-made highlight calls."""
+    if not figure.regions:
+        return ""
+    lines = []
+    for region in figure.regions:
+        x0, y0, x1, y1 = region.box
+        call = f"figure_region(image, {x0}, {y0}, {x1}, {y1})"
+        if region.point:
+            fx, fy = region.point
+            call += (
+                f" around its legend entry, and an Arrow ending at "
+                f"figure_point(image, {fx}, {fy}) on the curve"
+            )
+        lines.append(f"  - {region.name}: {call}")
+    return (
+        "\nMEASURED HIGHLIGHTS (located by a vision model; use these exact numbers, never "
+        "estimate or adjust positions yourself, and add no other boxes on this figure):\n"
+        + "\n".join(lines)
+    )
 
-    Only the model's copy has the grid; the video shows the clean figure.
+
+def _figure_images(spec: SceneSpec) -> list[bytes]:
+    """The paper figures for the code model to see.
+
+    A figure without measured highlights gets a coordinate grid so the model
+    can read positions off it; only the model's copy has the grid, the video
+    shows the clean figure.
     """
     images = []
     for figure in spec.paper_figures:
         try:
-            images.append(_with_fraction_grid(Path(figure.path)))
+            path = Path(figure.path)
+            images.append(path.read_bytes() if figure.regions else _with_fraction_grid(path))
         except OSError:
             logger.warning("Paper figure %s is missing at %s", figure.label, figure.path)
     return images

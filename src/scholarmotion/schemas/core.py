@@ -117,6 +117,14 @@ class DataPlot(BaseModel):
         )
 
 
+class FigureRegion(BaseModel):
+    """A measured part of a paper figure to highlight, as fractions from its top-left."""
+
+    name: str
+    box: list[float]  # x0, y0, x1, y1
+    point: list[float] | None = None  # fx, fy: where an arrow points (curves)
+
+
 class PaperFigure(BaseModel):
     """A figure cropped from the source paper, shown as an image in a scene."""
 
@@ -127,6 +135,9 @@ class PaperFigure(BaseModel):
     width: int = 0
     height: int = 0
     focus: str = ""  # what the lecture should point at in it
+    # Located by a vision model before the scene is written; the code model
+    # uses these boxes as given instead of estimating positions itself.
+    regions: list[FigureRegion] = Field(default_factory=list)
 
 
 class CurriculumItem(BaseModel):

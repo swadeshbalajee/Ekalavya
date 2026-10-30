@@ -199,6 +199,22 @@ def create_vision_provider(settings: Settings):
     )
 
 
+def create_figure_locators(settings: Settings) -> tuple:
+    """(locator, second opinion) for paper-figure highlights; None where not configured."""
+    models = _csv_models(settings.figure_locator_models)
+    if not models or not settings.visual_llm_provider or settings.visual_llm_provider == "mock":
+        return None, None
+    providers = [
+        create_vision_provider(
+            settings.model_copy(
+                update={"visual_llm_model": model, "visual_llm_fallback_models": ""}
+            )
+        )
+        for model in models[:2]
+    ]
+    return providers[0], (providers[1] if len(providers) > 1 else None)
+
+
 def create_video_provider(settings: Settings):
     """Build the configured rendered-scene reviewer, including frame-only Gemini QA."""
     if not settings.video_verification_enabled:

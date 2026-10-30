@@ -230,28 +230,47 @@ def _escalating_pipeline(tmp_path, verdicts: list[dict], calls: list, cheap_down
 
 
 @pytest.mark.asyncio
-async def test_stronger_model_fixes_then_rewrites_after_two_cheap_failures(tmp_path, monkeypatch):
+async def test_stronger_model_takes_over_from_the_best_version_after_two_cheap_failures(
+    tmp_path, monkeypatch
+):
     from scholarmotion.agents import code_generator
 
     monkeypatch.setattr(code_generator, "CODE_RETRY_DELAY_SECONDS", 0)
-    bad = _checklist(text_overlap="labels on the bars")
+    worse = _checklist(text_overlap="labels on the bars", in_frame="cut off")
+    better = _checklist(highlight_targets="box on the legend")
     calls: list = []
-    pipeline = _escalating_pipeline(tmp_path, [bad, bad, bad, _checklist()], calls)
+    pipeline = _escalating_pipeline(tmp_path, [worse, better, worse, _checklist()], calls)
     result = await pipeline.produce_scene("p", SPEC, prefetched_corrections=[])
 
     assert result.report.passed
     assert [model for model, _, _ in calls] == ["cheap", "cheap", "strong", "strong"]
-    _, fix_prompt, fix_images = calls[2]
-    # The first hand-over repairs the cheap model's code, sees the failed render,
-    # and knows what the earlier attempts already tried.
-    assert "FAILED SOURCE TO REPAIR" in fix_prompt
-    assert "EARLIER ATTEMPTS" in fix_prompt
-    assert "Attempt 1 (cheap)" in fix_prompt and "Attempt 2 (cheap)" in fix_prompt
-    assert fix_images == 1
-    # If that fix fails too, the stronger model starts from scratch.
-    _, fresh_prompt, fresh_images = calls[3]
-    assert "FAILED SOURCE TO REPAIR" not in fresh_prompt
-    assert fresh_images == 0
+    for _, prompt, images in calls[2:]:
+        # Each hand-over works from the best version so far (the cheap model's
+        # second, at 88%), may rewrite any of it, sees its stills and knows
+        # what the earlier attempts already tried.
+        assert "BEST VERSION SO FAR (render 2 by cheap, review checklist 88%" in prompt
+        assert "highlight_targets" in prompt
+        assert "rewrite any part" in prompt
+        assert "EARLIER ATTEMPTS" in prompt and "Attempt 1 (cheap)" in prompt
+        assert images == 1
+    # A worse third attempt does not become the starting point.
+    assert "Attempt 3 (strong)" in calls[3][1]
+
+
+@pytest.mark.asyncio
+async def test_when_every_attempt_fails_the_best_one_ships(tmp_path, monkeypatch):
+    from scholarmotion.agents import code_generator
+
+    monkeypatch.setattr(code_generator, "CODE_RETRY_DELAY_SECONDS", 0)
+    calls: list = []
+    near = _checklist(not_crowded="busy", readable="small")  # 88%, minor items only
+    far = _checklist(not_crowded="busy", readable="small", no_placeholders="empty box")
+    pipeline = _escalating_pipeline(tmp_path, [near, far], calls)
+    pipeline.manager.max_repair_attempts = 1
+    result = await pipeline.produce_scene("p", SPEC, prefetched_corrections=[])
+
+    assert not result.report.passed
+    assert result.render_version == 1
 
 
 @pytest.mark.asyncio

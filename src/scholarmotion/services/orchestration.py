@@ -144,6 +144,7 @@ def _fallback_video_findings(issues: list[dict]) -> list[dict]:
     ]
 
 
+from scholarmotion.retrieval.figure_regions import locate_figure_regions
 from scholarmotion.verification.aggregator import aggregate_reports
 from scholarmotion.verification.checklist import checklist_prompt, score_checklist
 from scholarmotion.verification.figures import verify_paper_figures_shown
@@ -177,8 +178,10 @@ def scene_review_prompt(
     return (
         "You review one scene of a narrated STEM lesson for a student. You receive the rendered "
         "video, its narration audio (same start time) and stills from it.\n"
-        "Judge like a careful teacher, not a pixel checker. Brief motion while one object "
-        "transforms into another is fine. Small text that is still clearly readable is fine. "
+        "Judge like a careful teacher, not a pixel checker. Judge only settled frames, where "
+        "nothing is moving: objects fading in or out, moving or transforming are never a fault, "
+        "even if they cross something on the way; give the settled time where you saw a problem. "
+        "Small text that is still clearly readable is fine. "
         "A correct diagram held still while it is explained is fine. Fail an item only for a "
         "problem a student would notice. Look closely at the stills: labels sitting on bars or "
         "lines, a highlight on the wrong part of a figure, and boxes with nothing in them are "
@@ -342,10 +345,18 @@ def _read_log(path: str | None) -> str:
         return ""
 
 
-def _attempt_rank(report: VerificationReport) -> tuple[int, int, float]:
-    """Sort key for rendered attempts: fewest critical, then high issues, then best score."""
+def _attempt_rank(
+    report: VerificationReport, checklist_score: float | None = None
+) -> tuple[int, int, float, float]:
+    """Sort key for attempts: fewest critical, then high issues, then the reviewer's
+    checklist score, then the overall score. Lower is better; ties keep the earlier."""
     severities = [issue.severity for issue in report.issues]
-    return (severities.count("critical"), severities.count("high"), -report.score)
+    return (
+        severities.count("critical"),
+        severities.count("high"),
+        -(checklist_score or 0.0),
+        -report.score,
+    )
 
 
 # Layout faults are placement problems: something overlaps, sits too low, or is
@@ -443,6 +454,7 @@ class ScholarMotionPipeline:
         code_llm=None,
         code_escalation_llm=None,
         escalate_after_failures: int = 2,
+        figure_locators: tuple = (None, None),
         planner_llm=None,
         vision=None,
         video_verifier=None,
@@ -467,6 +479,8 @@ class ScholarMotionPipeline:
         # A stronger code model that takes over a scene the code model keeps failing.
         self.code_escalation_llm = code_escalation_llm
         self.escalate_after_failures = max(1, escalate_after_failures)
+        # Vision models that box the parts of paper figures a scene points at.
+        self.figure_locators = figure_locators
         # Light planning steps (storyboard, flow review) may use a cheaper model.
         self.planner_llm = planner_llm or llm
         self.vision = vision
@@ -1147,6 +1161,11 @@ class ScholarMotionPipeline:
                 ),
             }
         )
+        located = await self._locate_figure_parts(spec)
+        if located is not spec:
+            # Both copies carry the boxes, so a re-planned repair keeps them.
+            spec = located
+            display_spec = display_spec.model_copy(update={"paper_figures": spec.paper_figures})
         code_model = getattr(self.code_llm, "model", "") or "code model"
         try:
             generated = await generate_scene_code(
@@ -1174,6 +1193,8 @@ class ScholarMotionPipeline:
             )
             code_model = getattr(stronger, "model", "") or "code model"
         attempt_log: list[str] = []
+        best_attempt: dict | None = None
+        fallback_rank = best_any_rank = None
         code_key = f"{base}/code/v{artifact_version}.py"
         code_version = artifact_version
         if existing_audio is None:
@@ -1473,12 +1494,34 @@ class ScholarMotionPipeline:
                 self._json(
                     f"{base}/verification/v{render_version}-checklist.json", checklist_scores
                 )
-            if result.video_path and _only_cosmetic(report):
-                fallback = (result.video_path, report, render_version, code_version, video_duration)
-            if result.video_path and (
-                best_any is None or _attempt_rank(report) < _attempt_rank(best_any[1])
+            checklist_score = (
+                min(entry["score"] for entry in checklist_scores) if checklist_scores else None
+            )
+            rank = _attempt_rank(report, checklist_score)
+            # When every attempt fails, ship the best one, not the latest.
+            if (
+                result.video_path
+                and _only_cosmetic(report)
+                and (fallback is None or rank < fallback_rank)
             ):
+                fallback = (result.video_path, report, render_version, code_version, video_duration)
+                fallback_rank = rank
+            if result.video_path and (best_any is None or rank < best_any_rank):
                 best_any = (result.video_path, report, render_version, code_version, video_duration)
+                best_any_rank = rank
+            # Repairs work from the best attempt so far, so a repair that made
+            # things worse does not become the starting point of the next one.
+            if best_attempt is None or rank < best_attempt["rank"]:
+                best_attempt = {
+                    "rank": rank,
+                    "code": generated.python_code,
+                    "report": report,
+                    "hints": geometry_hints,
+                    "frames": review_frames,
+                    "render_version": render_version,
+                    "checklist_score": checklist_score,
+                    "model": code_model,
+                }
             if report.passed and result.video_path:
                 render_path = result.video_path
                 events.append("scene.complete")
@@ -1525,11 +1568,12 @@ class ScholarMotionPipeline:
             await self._notify_progress(
                 "scene.repairing", spec.scene_id, {"action": action.value, "attempt": attempt + 2}
             )
-            feedback = _grouped_repair_feedback(report.issues)
-            if geometry_hints:
+            best = best_attempt
+            feedback = _grouped_repair_feedback(best["report"].issues)
+            if best["hints"]:
                 feedback.append(
                     "Geometry measurements (hints only; fix if they match what the reviewer saw):\n"
-                    + "\n".join(_grouped_repair_feedback(geometry_hints))
+                    + "\n".join(_grouped_repair_feedback(best["hints"]))
                 )
             if action in {RepairAction.REVISE_SPEC, RepairAction.SIMPLIFY}:
                 # Simplify the drawing, not the narrated sequence: dropping the
@@ -1570,12 +1614,28 @@ class ScholarMotionPipeline:
                     "that already failed):\n" + "\n".join(attempt_log)
                 )
             # The cheap model writes and repairs first. After it has failed
-            # `escalate_after` times, the stronger model fixes its code once, with
-            # the stills the reviewer saw; if that fails too, it starts fresh.
+            # `escalate_after` times the stronger model takes over: it gets the
+            # same brief, the best version so far with its score and findings,
+            # and the stills the reviewer saw, and may reuse or rewrite any of it.
             stronger = getattr(self, "code_escalation_llm", None)
             escalate_after = getattr(self, "escalate_after_failures", 2)
             escalated = stronger is not None and failures >= escalate_after
-            fresh_start = escalated and failures == escalate_after + 1
+            failed_checks = sorted(
+                {
+                    issue.category.removeprefix("video.checklist.")
+                    for issue in best["report"].issues
+                    if issue.severity in {"high", "critical"}
+                }
+            )
+            best_note = (
+                f"render {best['render_version']} by {best['model']}"
+                + (
+                    f", review checklist {best['checklist_score']:.0%} (90% passes)"
+                    if best["checklist_score"] is not None
+                    else ""
+                )
+                + (f"; blocking findings: {', '.join(failed_checks)}" if failed_checks else "")
+            )
             if escalated and failures == escalate_after:
                 await self._notify_progress(
                     "scene.escalated",
@@ -1602,9 +1662,10 @@ class ScholarMotionPipeline:
                         # repair silently restores the planner's longer duration and
                         # reintroduces audio/video drift.
                         sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
-                        previous_code="" if fresh_start else generated.python_code,
+                        previous_code=best["code"],
+                        previous_code_note=best_note,
                         edit_request=edit_request,
-                        review_frames=review_frames if escalated and not fresh_start else None,
+                        review_frames=best["frames"] if escalated else None,
                     )
                     code_model = getattr(provider, "model", "") or "code model"
                     break
@@ -1688,6 +1749,27 @@ class ScholarMotionPipeline:
             return still
         reasons = "; ".join(_issue_reasons(report)) if report else "unknown error"
         raise RuntimeError(f"{spec.scene_id} blocked after all repair attempts: {reasons}")
+
+    async def _locate_figure_parts(self, spec: SceneSpec) -> SceneSpec:
+        """Box the parts of each paper figure this scene points at (once per figure)."""
+        locator, backup = getattr(self, "figure_locators", None) or (None, None)
+        missing = [figure for figure in spec.paper_figures if not figure.regions]
+        if locator is None or not missing:
+            return spec
+        found = await asyncio.gather(
+            *(locate_figure_regions(locator, backup, figure, spec.narration) for figure in missing)
+        )
+        regions = {figure.label: parts for figure, parts in zip(missing, found, strict=True)}
+        return spec.model_copy(
+            update={
+                "paper_figures": [
+                    figure.model_copy(update={"regions": regions[figure.label]})
+                    if figure.label in regions
+                    else figure
+                    for figure in spec.paper_figures
+                ]
+            }
+        )
 
     def _still_scene(
         self,

@@ -75,7 +75,9 @@ async def run(directory: Path) -> None:
                     },
                 }
             )
-        await QdrantVectorStore(QdrantConfig.from_settings(settings)).upsert_source_chunks(qdrant_chunks)
+        await QdrantVectorStore(QdrantConfig.from_settings(settings)).upsert_source_chunks(
+            qdrant_chunks
+        )
         for chunk in indexed_rows:
             chunk.vector_revision = 1
         await session.commit()

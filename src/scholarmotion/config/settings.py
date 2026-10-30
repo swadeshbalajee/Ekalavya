@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     visual_llm_model: str | None = None
     visual_llm_fallback_models: str = ""
     visual_llm_base_url: str | None = None
+    # Models that find the parts of a paper figure a scene highlights: the
+    # first boxes them, the second takes a look when a box is implausible.
+    # They use the VISUAL_LLM provider, key and base URL. Empty turns it off.
+    figure_locator_models: str = "google/gemini-3.8-flash,anthropic/claude-sonnet-5.5"
     video_verification_enabled: bool = True
     video_llm_provider: str = "openai_compatible"
     video_llm_api_key: str | None = None
