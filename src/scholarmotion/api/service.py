@@ -1275,6 +1275,66 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
 
 
 @_metered("edit")
+async def _recheck_edited_figures(
+    session, runtime: ScholarMotionPipeline, project_id: UUID, spec: SceneSpec, instruction: str
+) -> SceneSpec:
+    """Crop an edited scene's paper figures again and check them with the learner's words.
+
+    A figure whose caption cannot be found keeps its current image; one the check
+    rejects is left out, so the scene explains it without the picture.
+    """
+    if not spec.paper_figures:
+        return spec
+    labels = {figure.label for figure in spec.paper_figures}
+    out_dir = runtime.storage.local_path(f"{project_id}/paper_figures")
+    pdf_path, found = None, []
+    for paper in await project_papers(session, project_id):
+        pdf_path = runtime.storage.local_path(paper.uri)
+        try:
+            found = await asyncio.to_thread(extract_figures, pdf_path, out_dir, labels=labels)
+        except Exception as error:  # noqa: BLE001 - keep the scene's current figures
+            logger.warning("Could not crop figures again for %s: %s", spec.scene_id, error)
+            found = []
+        if found:
+            break
+    if not found:
+        return spec
+    with usage_stage("figure_check"):
+        kept, checks = await check_figure_crops(runtime.vision, pdf_path, found, hint=instruction)
+    await record_event(
+        session,
+        project_id,
+        "paper.figures",
+        detail={
+            "scene": spec.scene_id,
+            "edit": instruction[:300],
+            "requested": sorted(labels),
+            "cropped": sorted(crop.label for crop in found),
+            "checks": {check.label: check.outcome for check in checks},
+            "dropped": {
+                check.label: check.reason for check in checks if check.outcome == "dropped"
+            },
+        },
+    )
+    found_labels = {crop.label for crop in found}
+    crops = {crop.label: crop for crop in kept}
+    figures = [
+        figure
+        if figure.label not in found_labels
+        else figure.model_copy(
+            update={
+                "path": crops[figure.label].path,
+                "filename": Path(crops[figure.label].path).name,
+                "width": crops[figure.label].width,
+                "height": crops[figure.label].height,
+            }
+        )
+        for figure in spec.paper_figures
+        if figure.label not in found_labels or figure.label in crops
+    ]
+    return spec.model_copy(update={"paper_figures": figures})
+
+
 async def edit_range(
     database: Database,
     settings: Settings,
@@ -1381,6 +1441,10 @@ async def edit_range(
                         sentence_timings=audio_row.timings,
                         word_timings=[],
                     )
+            if not localization_only:
+                spec = await _recheck_edited_figures(
+                    session, runtime, project_id, spec, instruction
+                )
             produced = await runtime.produce_scene(
                 str(project_id),
                 spec,
@@ -1391,6 +1455,8 @@ async def edit_range(
                 # these IDs are omitted, verification treats every citation as
                 # unknown and blocks otherwise valid regeneration attempts.
                 known_source_ids=set(spec.source_ids),
+                # The code model sees what the learner asked for, not only the plan.
+                edit_request="" if localization_only else instruction,
             )
             old_code = await session.scalar(
                 select(GeneratedCode).where(

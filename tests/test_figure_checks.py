@@ -126,3 +126,51 @@ def test_a_scene_must_show_the_figures_it_was_given():
     shown = "image = paper_figure('figure-3.png', 'main')\n"
     assert verify_paper_figures_shown(_spec(), shown) == []
     assert verify_paper_figures_shown(_spec(paper_figures=[]), "x = 1\n") == []
+
+
+@pytest.mark.asyncio
+async def test_an_edit_crops_its_figures_again_and_checks_them_with_the_request(
+    tmp_path, monkeypatch
+):
+    from scholarmotion.api import service
+
+    pdf = _pdf(tmp_path)
+    store = SimpleNamespace(local_path=lambda key: tmp_path / key)
+    vision = Vision(
+        {"verdict": "fix", "figure_box": [100, 500, 900, 900], "issues": ["cut off"]},
+        {"verdict": "ok", "issues": []},
+    )
+    runtime = SimpleNamespace(storage=store, vision=vision)
+
+    async def papers(session, project_id):
+        return [SimpleNamespace(uri="paper.pdf")]
+
+    def extract(pdf_path, out_dir, *, labels):
+        assert labels == {"Figure 3", "Figure 9"}
+        return [_crop(tmp_path, "Figure 3")]  # Figure 9's caption is not found
+
+    events = []
+
+    async def record(session, project_id, event, **kwargs):
+        events.append((event, kwargs["detail"]))
+
+    monkeypatch.setattr(service, "project_papers", papers)
+    monkeypatch.setattr(service, "extract_figures", extract)
+    monkeypatch.setattr(service, "record_event", record)
+    spec = _spec(
+        paper_figures=[
+            PaperFigure(label="Figure 3", filename="figure-3.png", width=1).model_dump(),
+            PaperFigure(label="Figure 9", filename="figure-9.png", width=7).model_dump(),
+        ]
+    )
+    assert pdf.name == "paper.pdf"
+
+    edited = await service._recheck_edited_figures(
+        None, runtime, "p1", spec, "The screenshot is incorrect"
+    )
+
+    assert "The screenshot is incorrect" in vision.prompts[0]
+    figures = {figure.label: figure for figure in edited.paper_figures}
+    assert figures["Figure 3"].width == pytest.approx(600 * 0.8 * 3, abs=3)  # re-cropped
+    assert figures["Figure 9"].width == 7  # not found again, so kept as it was
+    assert events[0][0] == "paper.figures" and events[0][1]["checks"] == {"Figure 3": "recropped"}

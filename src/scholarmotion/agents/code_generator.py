@@ -686,6 +686,7 @@ async def generate_scene_code(
     fallback_only: bool = False,
     sentence_durations: list[float] | None = None,
     previous_code: str = "",
+    edit_request: str = "",
 ) -> GeneratedSceneCode:
     scene_class = scene_class_name(spec.scene_id)
     context = "\n".join(corrections or [])
@@ -821,6 +822,12 @@ async def generate_scene_code(
         "When lesson_closing is tagged, finish on the resolved takeaway picture and hold it to the "
         "last word; never fade to black while the tutor is still speaking.\n\n"
         + f"RELEVANT CORRECTIONS:\n{context}\nREPAIR FEEDBACK:\n{repairs}\n"
+        + (
+            "LEARNER'S EDIT REQUEST for this scene (the reason it is being redone; make the "
+            f"picture answer it while still following the narration):\n{edit_request}\n"
+            if edit_request
+            else ""
+        )
         + (
             "FAILED SOURCE TO REPAIR:\n"
             + previous_code

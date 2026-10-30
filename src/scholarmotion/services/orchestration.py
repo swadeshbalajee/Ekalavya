@@ -1094,6 +1094,7 @@ class ScholarMotionPipeline:
         known_source_ids: set[str] | None = None,
         prefetched_corrections=None,
         code_skill_context: str | None = None,
+        edit_request: str = "",
     ) -> ProducedScene:
         # Each scene runs in its own task, so this labels only this scene's calls.
         set_usage_scene(spec.scene_id)
@@ -1158,6 +1159,7 @@ class ScholarMotionPipeline:
             skill_context=code_skills,
             narration=spoken_narration,
             sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
+            edit_request=edit_request,
         )
         code_key = f"{base}/code/v{artifact_version}.py"
         code_version = artifact_version
@@ -1541,6 +1543,7 @@ class ScholarMotionPipeline:
                     # reintroduces audio/video drift.
                     sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
                     previous_code=generated.python_code,
+                    edit_request=edit_request,
                 )
             except CodeGenerationError as error:
                 await self._notify_progress(

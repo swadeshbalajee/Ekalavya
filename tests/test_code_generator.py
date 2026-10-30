@@ -460,3 +460,22 @@ def test_offline_fallback_shows_only_the_scenes_own_title_and_equations():
     # Nothing topic-specific is invented, and the voice-over never appears on screen.
     assert "pipe" not in code.casefold()
     assert "narrow pipe resists" not in code
+
+
+@pytest.mark.asyncio
+async def test_a_scene_edit_shows_the_learners_request_to_the_code_model() -> None:
+    class CapturingProvider:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        async def generate_code(self, prompt: str) -> str:
+            self.prompts.append(prompt)
+            return "from manim import *\nclass SceneS01(Scene):\n    def construct(self):\n        self.wait(1)\n"
+
+    provider = CapturingProvider()
+    await generate_scene_code(provider, _scene("S01"), edit_request="The figure is cut off.")
+    await generate_scene_code(provider, _scene("S01"))
+
+    assert "LEARNER'S EDIT REQUEST" in provider.prompts[0]
+    assert "The figure is cut off." in provider.prompts[0]
+    assert "LEARNER'S EDIT REQUEST" not in provider.prompts[1]
