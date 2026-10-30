@@ -16,6 +16,7 @@ from scholarmotion.providers.llm.anthropic_provider import AnthropicProvider
 from scholarmotion.providers.llm.gemini_provider import GeminiProvider
 from scholarmotion.providers.llm.mock import MockLLMProvider
 from scholarmotion.providers.llm.openai_compatible import OpenAICompatibleProvider
+from scholarmotion.providers.llm.thinking import parse_rules
 from scholarmotion.providers.stt.gemini import GeminiSTTProvider
 from scholarmotion.providers.stt.mock import MockSTTProvider
 from scholarmotion.providers.stt.openai_compatible import OpenAICompatibleSTTProvider
@@ -125,6 +126,18 @@ def create_code_provider(settings: Settings):
         code_timeout_seconds=settings.code_generation_timeout_seconds,
         reasoning_effort=settings.code_reasoning_effort,
         code_max_output_tokens=settings.code_max_output_tokens,
+    )
+
+
+def create_code_escalation_provider(settings: Settings):
+    """The stronger code model that takes over failing scenes; None when not configured."""
+    model = settings.code_escalation_model
+    if not model or model == (settings.code_model or settings.main_llm_model):
+        return None
+    if (settings.code_provider or settings.main_llm_provider).lower() == "mock":
+        return None
+    return create_code_provider(
+        settings.model_copy(update={"code_model": model, "code_fallback_models": ""})
     )
 
 
@@ -269,6 +282,7 @@ def _create_llm(
             default_temperature=settings.agent_temperature,
             request_timeout_seconds=settings.llm_request_timeout_seconds,
             pdf_engine=settings.openrouter_pdf_engine,
+            thinking_rules=parse_rules(settings.model_thinking),
         )
     raise ValueError(f"unknown LLM provider: {name}")
 

@@ -2,7 +2,8 @@
 
 Moves each project's folder out of ``--old-root`` (flat ``<project_id>/`` or an
 earlier per-user layout), creates folders for projects that have none yet, and
-rewrites the absolute file paths stored in the database and inside the
+rewrites the absolute file paths stored in the database (columns and JSON
+documents) and inside the
 projects' JSON artifacts. It is a dry run unless ``--apply`` is given, and can
 be rerun safely. Stop the API and worker first, then set OBJECT_STORAGE_ROOT
 to the new root:
@@ -46,6 +47,17 @@ def rewrite(value, owners, new_root):
     if isinstance(value, list):
         return [rewrite(item, owners, new_root) for item in value]
     return relocate(value, owners, new_root) or value
+
+
+async def _is_jsonb(connection, table: str, column: str) -> bool:
+    kind = await connection.scalar(
+        text(
+            "select data_type from information_schema.columns where table_schema = 'public' "
+            "and table_name = :table and column_name = :column"
+        ),
+        {"table": table, "column": column},
+    )
+    return kind == "jsonb"
 
 
 def find_folder(roots: list[Path], project_id: str) -> Path | None:
@@ -118,6 +130,43 @@ async def main(old_root: Path, new_root: Path, apply: bool) -> None:
                         {"value": new_value, "id": row_id},
                     )
         print(f"{rows} stored paths rewritten")
+
+        # Paths inside JSON columns too, such as a scene plan's paper figures.
+        json_columns = (
+            await connection.execute(
+                text(
+                    "select c.table_name, c.column_name from information_schema.columns c "
+                    "where c.table_schema = 'public' and c.data_type in ('json', 'jsonb') "
+                    "and exists (select 1 from information_schema.columns i where "
+                    "i.table_schema = 'public' and i.table_name = c.table_name "
+                    "and i.column_name = 'id')"
+                )
+            )
+        ).all()
+        documents = 0
+        for table, column in json_columns:
+            values = await connection.execute(
+                text(
+                    f'select id, "{column}"::text from "{table}" '
+                    f"where \"{column}\"::text like '%projects%'"
+                )
+            )
+            for row_id, raw in values.all():
+                data = json.loads(raw)
+                updated = rewrite(data, owners, new_root)
+                if updated == data:
+                    continue
+                documents += 1
+                if apply:
+                    await connection.execute(
+                        text(
+                            f'update "{table}" set "{column}" = cast(:value as '
+                            f"{'jsonb' if await _is_jsonb(connection, table, column) else 'json'})"
+                            " where id = :id"
+                        ),
+                        {"value": json.dumps(updated), "id": row_id},
+                    )
+        print(f"{documents} stored JSON documents rewritten")
 
         files = 0
         # A dry run leaves folders in place, so look where they are now too.

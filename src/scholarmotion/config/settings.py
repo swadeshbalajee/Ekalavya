@@ -88,6 +88,23 @@ class Settings(BaseSettings):
     code_generation_timeout_seconds: int = 60
     code_reasoning_effort: str = Field(default="low", pattern="^(low|medium|high)$")
     code_max_output_tokens: int = Field(default=6000, ge=1024, le=64000)
+    # A stronger model that takes over a scene after the code model has failed
+    # it this many times: it first fixes the failing code, then starts fresh.
+    # Empty disables the hand-over.
+    code_escalation_model: str | None = None
+    code_escalation_after_failures: int = Field(default=2, ge=1, le=5)
+    # Thinking rule per model, overriding the effort levels above:
+    # "model=6000" caps thinking tokens, "model=off" turns thinking off,
+    # "model=low|medium|high" sets an effort. A key ending in "/" matches every
+    # model of that provider. Some open models ignore effort levels and spend
+    # the whole output budget thinking unless capped.
+    # Measured on real scene prompts (Oct 2026): GLM-5.3 Flash plans in ~6k
+    # tokens and needs the cap only as a guard; Qwen 3.8 Omni Flash took 127 s
+    # to review a 30 s clip while thinking and found less than with it off.
+    model_thinking: str = (
+        "z-ai/glm-5.3-flash=6000,z-ai/glm-5.3=8000,qwen/qwen3.8-omni-flash=off,"
+        "qwen/=4000,deepseek/=4000,moonshotai/=4000"
+    )
     visual_llm_provider: str | None = None
     visual_llm_api_key: str | None = None
     visual_llm_model: str | None = None

@@ -162,7 +162,7 @@ async def test_video_review_sends_paired_media_and_normalizes_absolute_issue_tim
 
     content = captured["messages"][0]["content"]
     assert [part["type"] for part in content] == ["text", "video_url", "input_audio", "image_url"]
-    assert captured["reasoning_effort"] == "low"
+    assert captured["extra_body"]["reasoning"] == {"effort": "low"}
     assert captured["response_format"] == {"type": "json_object"}
     # The reviewer's own category stands; no keyword rule re-labels it.
     assert result["issues"][0]["category"] == "video.unreadable_text"

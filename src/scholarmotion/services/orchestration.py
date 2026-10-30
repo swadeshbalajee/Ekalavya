@@ -145,6 +145,7 @@ def _fallback_video_findings(issues: list[dict]) -> list[dict]:
 
 
 from scholarmotion.verification.aggregator import aggregate_reports
+from scholarmotion.verification.checklist import checklist_prompt, score_checklist
 from scholarmotion.verification.figures import verify_paper_figures_shown
 from scholarmotion.verification.layout import verify_layout
 from scholarmotion.verification.math import verify_required_equations
@@ -171,31 +172,20 @@ WHOLE_SCENE_REVIEW_SECONDS = 90.0
 def scene_review_prompt(
     *, objective: str, tags: list[str], narration: str, cues: list[tuple], source_code: str
 ) -> str:
-    """Ask a video model one question: does this scene make sense to a student?"""
+    """Ask a video model to check a scene item by item, as a student would watch it."""
     cue_lines = "\n".join(f"{start:.2f}-{end:.2f}s: {text}" for start, end, text in cues)
     return (
         "You review one scene of a narrated STEM lesson for a student. You receive the rendered "
         "video, its narration audio (same start time) and stills from it.\n"
-        "Decide one thing: does this scene make sense as a teaching moment? It makes sense when "
-        "a student watching and listening can follow it: what is shown matches what is said at "
-        "that moment, every label and equation is readable on settled frames, nothing important "
-        "is covered, clipped or cluttered, and the visuals follow the narration's order.\n"
         "Judge like a careful teacher, not a pixel checker. Brief motion while one object "
         "transforms into another is fine. Small text that is still clearly readable is fine. "
-        "A correct diagram held still while it is explained is fine. Report only problems that "
-        "would confuse or mislead a student: unreadable or overlapping text, a visual that "
-        "contradicts or is missing for what is being said, visuals clearly early or late versus "
-        "the speech, math glyphs replaced by boxes, or notation spoken as punctuation. If "
-        "lesson_closing is tagged, the scene must end on a settled takeaway, not a teaser or an "
-        "abrupt cut.\n"
-        "Return compact JSON only: "
-        '{"makes_sense":true,"summary":"one or two sentences on what a student sees and hears",'
-        '"issues":[{"category":"overlap|readability|audio_video_sync|semantic_visual_mismatch|other",'
-        '"severity":"medium|high|critical","confidence":0.0,"timestamp_start_seconds":0.0,'
-        '"timestamp_end_seconds":1.0,"observed":"...","concrete_code_change":"..."}]}\n'
-        "Use severity high or critical only for problems that make the scene not make sense; set "
-        "makes_sense false in that case. List at most three issues, each with one concrete code "
-        "change (the source is given only to suggest fixes; judge what you see and hear).\n"
+        "A correct diagram held still while it is explained is fine. Fail an item only for a "
+        "problem a student would notice. Look closely at the stills: labels sitting on bars or "
+        "lines, a highlight on the wrong part of a figure, and boxes with nothing in them are "
+        "easy to miss in motion. If lesson_closing is tagged, the scene must end on a settled "
+        "takeaway, not a teaser or an abrupt cut.\n"
+        + checklist_prompt()
+        + "\n(The source is given only to suggest code changes; judge what you see and hear.)\n"
         f"Scene objective: {objective}\nScene tags: {tags}\nNarration: {narration}\n"
         f"Estimated sentence timing (not forced alignment):\n{cue_lines}\n"
         f"Scene source code:\n{source_code}"
@@ -451,6 +441,8 @@ class ScholarMotionPipeline:
         *,
         llm,
         code_llm=None,
+        code_escalation_llm=None,
+        escalate_after_failures: int = 2,
         planner_llm=None,
         vision=None,
         video_verifier=None,
@@ -472,6 +464,9 @@ class ScholarMotionPipeline:
     ):
         self.llm = llm
         self.code_llm = code_llm or llm
+        # A stronger code model that takes over a scene the code model keeps failing.
+        self.code_escalation_llm = code_escalation_llm
+        self.escalate_after_failures = max(1, escalate_after_failures)
         # Light planning steps (storyboard, flow review) may use a cheaper model.
         self.planner_llm = planner_llm or llm
         self.vision = vision
@@ -1152,15 +1147,33 @@ class ScholarMotionPipeline:
                 ),
             }
         )
-        generated = await generate_scene_code(
-            self.code_llm,
-            display_spec,
-            [entry.prompt_fragment() for entry in relevant],
-            skill_context=code_skills,
-            narration=spoken_narration,
-            sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
-            edit_request=edit_request,
-        )
+        code_model = getattr(self.code_llm, "model", "") or "code model"
+        try:
+            generated = await generate_scene_code(
+                self.code_llm,
+                display_spec,
+                [entry.prompt_fragment() for entry in relevant],
+                skill_context=code_skills,
+                narration=spoken_narration,
+                sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
+                edit_request=edit_request,
+            )
+        except CodeGenerationError:
+            # The cheap model is unavailable: the stronger one writes the scene.
+            stronger = getattr(self, "code_escalation_llm", None)
+            if stronger is None:
+                raise
+            generated = await generate_scene_code(
+                stronger,
+                display_spec,
+                [entry.prompt_fragment() for entry in relevant],
+                skill_context=code_skills,
+                narration=spoken_narration,
+                sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
+                edit_request=edit_request,
+            )
+            code_model = getattr(stronger, "model", "") or "code model"
+        attempt_log: list[str] = []
         code_key = f"{base}/code/v{artifact_version}.py"
         code_version = artifact_version
         if existing_audio is None:
@@ -1185,6 +1198,9 @@ class ScholarMotionPipeline:
         for attempt in range(self.manager.max_repair_attempts + 1):
             render_version = next_render_version
             next_render_version += 1
+            # Stills the video reviewer saw, and its checklist scores, for this render.
+            review_frames: list[bytes] = []
+            checklist_scores: list[dict] = []
             events.append("scene.render_started")
             await self._notify_progress("scene.render_started", spec.scene_id)
             render_dir = self.storage.local_path(f"{base}/render/v{render_version}")
@@ -1376,17 +1392,31 @@ class ScholarMotionPipeline:
                                 timestamp_offset_seconds=offset,
                                 excerpt_duration_seconds=excerpt_seconds,
                             )
+                            review_frames = [path.read_bytes() for path in sample_keyframes]
                             qa_issues = qa.get("issues", [])
+                            answers = qa.get("checklist") or []
                             # The deterministic fallback has one card transition per
                             # measured TTS cue. If its schedule matches the WAV exactly,
                             # use measured cues for timing and retain semantic, overlap,
                             # and readability findings from the video reviewer.
                             if measured_fallback_schedule:
                                 qa_issues = _fallback_video_findings(qa_issues)
+                                answers = [a for a in answers if a["id"] != "audio_video_sync"]
                             layers["video"].extend(
                                 VerificationIssue(scene_id=spec.scene_id, **issue)
                                 for issue in qa_issues
                             )
+                            if answers:
+                                checked = score_checklist(spec.scene_id, answers)
+                                layers["video"].extend(checked.issues)
+                                checklist_scores.append(
+                                    {
+                                        "excerpt_start": offset,
+                                        "score": round(checked.score, 3),
+                                        "passed": checked.passed,
+                                        "failed": checked.failed,
+                                    }
+                                )
                             if qa.get("makes_sense") is False and not any(
                                 issue.severity in {"high", "critical"} for issue in layers["video"]
                             ):
@@ -1439,6 +1469,10 @@ class ScholarMotionPipeline:
                 layers,
             )
             self._json(f"{base}/verification/v{render_version}.json", report)
+            if checklist_scores:
+                self._json(
+                    f"{base}/verification/v{render_version}-checklist.json", checklist_scores
+                )
             if result.video_path and _only_cosmetic(report):
                 fallback = (result.video_path, report, render_version, code_version, video_duration)
             if result.video_path and (
@@ -1525,29 +1559,62 @@ class ScholarMotionPipeline:
                 )
                 display_spec, spoken_narration = await self._localized_presentation(spec)
                 self._json(f"{base}/spec/v{spec.version}.json", spec)
-            try:
-                generated = await generate_scene_code(
-                    self.code_llm,
-                    display_spec,
-                    [entry.prompt_fragment() for entry in relevant],
-                    feedback,
-                    skill_context=code_skills,
-                    narration=spoken_narration,
-                    fallback_only=(
-                        action == RepairAction.SIMPLIFY
-                        and getattr(self.code_llm, "name", "") == "mock"
-                    ),
-                    # Deterministic scene templates must follow the measured audio
-                    # on every repair attempt, including REVISE_SPEC. Otherwise a
-                    # repair silently restores the planner's longer duration and
-                    # reintroduces audio/video drift.
-                    sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
-                    previous_code=generated.python_code,
-                    edit_request=edit_request,
+            failures = attempt + 1
+            attempt_log.append(
+                f"Attempt {failures} ({code_model}): "
+                + ("; ".join(_issue_reasons(report)) or (result.error or "render failed")[:200])
+            )
+            if len(attempt_log) > 1:
+                feedback.append(
+                    "EARLIER ATTEMPTS (each was rejected for these reasons; do not repeat a fix "
+                    "that already failed):\n" + "\n".join(attempt_log)
                 )
-            except CodeGenerationError as error:
+            # The cheap model writes and repairs first. After it has failed
+            # `escalate_after` times, the stronger model fixes its code once, with
+            # the stills the reviewer saw; if that fails too, it starts fresh.
+            stronger = getattr(self, "code_escalation_llm", None)
+            escalate_after = getattr(self, "escalate_after_failures", 2)
+            escalated = stronger is not None and failures >= escalate_after
+            fresh_start = escalated and failures == escalate_after + 1
+            if escalated and failures == escalate_after:
                 await self._notify_progress(
-                    "scene.code_failed", spec.scene_id, {"reasons": [str(error)[:300]]}
+                    "scene.escalated",
+                    spec.scene_id,
+                    {"model": getattr(stronger, "model", ""), "after_attempts": failures},
+                )
+            providers = [stronger] if escalated else [self.code_llm, stronger]
+            code_error: Exception | None = None
+            for provider in [candidate for candidate in providers if candidate is not None]:
+                try:
+                    generated = await generate_scene_code(
+                        provider,
+                        display_spec,
+                        [entry.prompt_fragment() for entry in relevant],
+                        feedback,
+                        skill_context=code_skills,
+                        narration=spoken_narration,
+                        fallback_only=(
+                            action == RepairAction.SIMPLIFY
+                            and getattr(provider, "name", "") == "mock"
+                        ),
+                        # Deterministic scene templates must follow the measured audio
+                        # on every repair attempt, including REVISE_SPEC. Otherwise a
+                        # repair silently restores the planner's longer duration and
+                        # reintroduces audio/video drift.
+                        sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
+                        previous_code="" if fresh_start else generated.python_code,
+                        edit_request=edit_request,
+                        review_frames=review_frames if escalated and not fresh_start else None,
+                    )
+                    code_model = getattr(provider, "model", "") or "code model"
+                    break
+                except CodeGenerationError as error:
+                    # The cheap model being unavailable is a reason to try the
+                    # stronger one, not to give up on the scene.
+                    code_error = error
+            else:
+                await self._notify_progress(
+                    "scene.code_failed", spec.scene_id, {"reasons": [str(code_error)[:300]]}
                 )
                 break
             code_version += 1

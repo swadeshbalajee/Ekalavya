@@ -149,3 +149,119 @@ async def test_geometry_still_gates_when_no_video_reviewer_exists(tmp_path):
     # Layout-only faults ship as a degraded scene instead of a passed one.
     assert not result.report.passed
     assert result.report.layers["layout"] is False
+
+
+def _checklist(**failed) -> dict:
+    """A reviewer answer in checklist form; ``failed`` maps item id to what was seen."""
+    from scholarmotion.verification.checklist import CHECKLIST
+
+    return {
+        "summary": "A scene.",
+        "issues": [],
+        "checklist": [
+            {
+                "id": item.id,
+                "passed": item.id not in failed,
+                "description": failed.get(item.id, ""),
+                "suggested_repair": "Move the label." if item.id in failed else "",
+            }
+            for item in CHECKLIST
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_clean_checklist_passes_and_a_failed_must_item_rejects(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    passing = await _pipeline(tmp_path / "a", _checklist()).produce_scene(
+        "p", SPEC, prefetched_corrections=[]
+    )
+    assert passing.report.passed
+
+    pipeline = _pipeline(tmp_path / "b", _checklist(text_overlap="12.9 sits on the axis"))
+    pipeline.manager.max_repair_attempts = 0
+    failing = await pipeline.produce_scene("p", SPEC, prefetched_corrections=[])
+    assert not failing.report.passed
+    overlap = next(i for i in failing.report.issues if i.category.endswith("text_overlap"))
+    assert overlap.severity == "high"
+    assert "12.9 sits on the axis" in overlap.description
+
+
+@pytest.mark.asyncio
+async def test_one_minor_checklist_miss_still_passes_as_feedback(tmp_path):
+    result = await _pipeline(tmp_path, _checklist(not_crowded="busy")).produce_scene(
+        "p", SPEC, prefetched_corrections=[]
+    )
+    assert result.report.passed
+    assert [i.severity for i in result.report.issues] == ["low"]
+
+
+class _CodeModel:
+    """Records each request; ``fail`` makes every request raise."""
+
+    def __init__(self, model: str, calls: list, fail: bool = False):
+        self.name, self.model, self.calls, self.fail = "openai_compatible", model, calls, fail
+
+    async def generate_code(self, prompt, *, cached_prefix=None, purpose="code", images=None):
+        if self.fail:
+            raise RuntimeError(f"{self.model} is down")
+        self.calls.append((self.model, prompt, len(images or [])))
+        return (
+            "from manim import *\nclass SceneS01(Scene):\n def construct(self):\n  self.wait(4)\n"
+        )
+
+
+def _escalating_pipeline(tmp_path, verdicts: list[dict], calls: list, cheap_down=False):
+    pipeline = _pipeline(tmp_path, verdicts[0])
+    answers = iter(verdicts)
+
+    async def review(*_args, **_kwargs):
+        return next(answers)
+
+    pipeline.video_verifier = SimpleNamespace(analyze_video=review)
+    frame = tmp_path / "frame.png"
+    frame.write_bytes(b"png")
+    pipeline.assembler.extract_review_keyframes = lambda *_: [frame]
+    pipeline.code_llm = _CodeModel("cheap", calls, fail=cheap_down)
+    pipeline.code_escalation_llm = _CodeModel("strong", calls)
+    pipeline.escalate_after_failures = 2
+    return pipeline
+
+
+@pytest.mark.asyncio
+async def test_stronger_model_fixes_then_rewrites_after_two_cheap_failures(tmp_path, monkeypatch):
+    from scholarmotion.agents import code_generator
+
+    monkeypatch.setattr(code_generator, "CODE_RETRY_DELAY_SECONDS", 0)
+    bad = _checklist(text_overlap="labels on the bars")
+    calls: list = []
+    pipeline = _escalating_pipeline(tmp_path, [bad, bad, bad, _checklist()], calls)
+    result = await pipeline.produce_scene("p", SPEC, prefetched_corrections=[])
+
+    assert result.report.passed
+    assert [model for model, _, _ in calls] == ["cheap", "cheap", "strong", "strong"]
+    _, fix_prompt, fix_images = calls[2]
+    # The first hand-over repairs the cheap model's code, sees the failed render,
+    # and knows what the earlier attempts already tried.
+    assert "FAILED SOURCE TO REPAIR" in fix_prompt
+    assert "EARLIER ATTEMPTS" in fix_prompt
+    assert "Attempt 1 (cheap)" in fix_prompt and "Attempt 2 (cheap)" in fix_prompt
+    assert fix_images == 1
+    # If that fix fails too, the stronger model starts from scratch.
+    _, fresh_prompt, fresh_images = calls[3]
+    assert "FAILED SOURCE TO REPAIR" not in fresh_prompt
+    assert fresh_images == 0
+
+
+@pytest.mark.asyncio
+async def test_unavailable_code_model_hands_the_scene_to_the_stronger_one(tmp_path, monkeypatch):
+    from scholarmotion.agents import code_generator
+
+    monkeypatch.setattr(code_generator, "CODE_RETRY_DELAY_SECONDS", 0)
+    calls: list = []
+    pipeline = _escalating_pipeline(tmp_path, [_checklist()], calls, cheap_down=True)
+    result = await pipeline.produce_scene("p", SPEC, prefetched_corrections=[])
+
+    assert result.report.passed
+    assert [model for model, _, _ in calls] == ["strong"]

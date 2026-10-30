@@ -31,7 +31,7 @@ RUN pip install ".[llm,embeddings,alignment,manim]" \
 
 COPY alembic.ini ./
 COPY alembic ./alembic
-COPY scripts/retitle_chats.py scripts/migrate_project_storage.py ./scripts/
+COPY scripts/retitle_chats.py scripts/migrate_project_storage.py scripts/eval_scenes.py ./scripts/
 COPY frontend ./frontend
 COPY .streamlit ./.streamlit
 

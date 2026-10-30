@@ -1,6 +1,7 @@
 """Model provider adapters (LLM, TTS, STT, embeddings) and their factory."""
 
 from .factory import (
+    create_code_escalation_provider,
     create_code_provider,
     create_embedding_provider,
     create_llm_provider,
@@ -14,6 +15,7 @@ from .factory import (
 )
 
 __all__ = [
+    "create_code_escalation_provider",
     "create_code_provider",
     "create_embedding_provider",
     "create_llm_provider",

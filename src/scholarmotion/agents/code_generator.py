@@ -687,6 +687,7 @@ async def generate_scene_code(
     sentence_durations: list[float] | None = None,
     previous_code: str = "",
     edit_request: str = "",
+    review_frames: list[bytes] | None = None,
 ) -> GeneratedSceneCode:
     scene_class = scene_class_name(spec.scene_id)
     context = "\n".join(corrections or [])
@@ -838,6 +839,12 @@ async def generate_scene_code(
             if previous_code
             else ""
         )
+        + (
+            f"The last {len(review_frames)} attached pictures are stills of that failed render, "
+            "in time order, as the reviewer saw them. Find each reported problem in them.\n"
+            if review_frames and previous_code
+            else ""
+        )
         + "Return only complete Python code."
     )
     if fallback_only or getattr(provider, "name", "") == "mock":
@@ -858,7 +865,7 @@ async def generate_scene_code(
                     prompt,
                     [shared_rules, template_block],
                     repair=bool(previous_code),
-                    images=_figure_images(spec),
+                    images=_figure_images(spec) + list(review_frames or []),
                 )
                 break
             except Exception as error:  # noqa: BLE001 - provider SDK errors vary

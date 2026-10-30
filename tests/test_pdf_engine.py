@@ -31,7 +31,7 @@ def _provider(models, engine="cloudflare-ai"):
 
 @pytest.mark.asyncio
 async def test_models_that_read_files_get_the_pdf_and_others_a_conversion(monkeypatch):
-    monkeypatch.setattr(openai_compatible, "_FILE_MODELS", None)
+    monkeypatch.setattr(openai_compatible, "_MODEL_INPUTS", None)
     provider = _provider(
         _Models(
             [
@@ -49,8 +49,8 @@ async def test_models_that_read_files_get_the_pdf_and_others_a_conversion(monkey
 
 @pytest.mark.asyncio
 async def test_an_unreachable_model_list_falls_back_to_the_conversion(monkeypatch):
-    monkeypatch.setattr(openai_compatible, "_FILE_MODELS", None)
+    monkeypatch.setattr(openai_compatible, "_MODEL_INPUTS", None)
     provider = _provider(_Models(error=RuntimeError("offline")))
 
     assert await provider._pdf_engine("anthropic/claude-sonnet-5.5") == "cloudflare-ai"
-    assert openai_compatible._FILE_MODELS is None
+    assert openai_compatible._MODEL_INPUTS is None

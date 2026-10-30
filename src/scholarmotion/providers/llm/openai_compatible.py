@@ -17,11 +17,12 @@ from scholarmotion.observability import record_provider_event
 from scholarmotion.observability.usage import record_failure, record_usage
 
 from .base import LLMCapabilities, call_timeout_seconds
+from .thinking import Thinking, thinking_for
 
 T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
-# OpenRouter models that accept files (PDFs) as input, listed once per process.
-_FILE_MODELS: set[str] | None = None
+# Input kinds (text, image, file, ...) of each OpenRouter model, listed once per process.
+_MODEL_INPUTS: dict[str, set[str]] | None = None
 
 
 class OpenAICompatibleProvider:
@@ -42,6 +43,7 @@ class OpenAICompatibleProvider:
         default_temperature: float = 0.7,
         request_timeout_seconds: int = 90,
         pdf_engine: str = "cloudflare-ai",
+        thinking_rules: list[tuple[str, str]] | None = None,
     ):
         try:
             from openai import AsyncOpenAI
@@ -64,6 +66,7 @@ class OpenAICompatibleProvider:
         self.structured_reasoning_effort = structured_reasoning_effort
         self.default_temperature = default_temperature
         self.pdf_engine = pdf_engine
+        self.thinking_rules = thinking_rules or []
         self.fallback_models = [
             candidate for candidate in (fallback_models or []) if candidate != model
         ]
@@ -73,27 +76,40 @@ class OpenAICompatibleProvider:
         """The caller's temperature, else the configured agent temperature."""
         return getattr(self, "default_temperature", 0.7) if value is None else value
 
+    def _thinking(self, model: str, effort: str | None) -> Thinking:
+        """This model's thinking rule; models without one use ``effort``."""
+        return thinking_for(model, effort, getattr(self, "thinking_rules", []))
+
+    async def _model_inputs(self, model: str) -> set[str] | None:
+        """What ``model`` accepts as input on OpenRouter; None when unknown."""
+        global _MODEL_INPUTS
+        if _MODEL_INPUTS is None:
+            try:
+                page = await self.client.models.list()
+            except Exception as error:  # noqa: BLE001 - unknown models keep their input
+                logger.warning("Could not list OpenRouter models: %s", error)
+                return None
+            _MODEL_INPUTS = {
+                item.id: set(
+                    ((item.model_extra or {}).get("architecture") or {}).get("input_modalities", [])
+                )
+                for item in page.data
+            }
+        return _MODEL_INPUTS.get(model)
+
     async def _pdf_engine(self, model: str) -> str:
         """OpenRouter's PDF engine for ``model``: the PDF itself when the model reads
         files, otherwise the configured text conversion."""
-        global _FILE_MODELS
-        if _FILE_MODELS is None:
-            try:
-                page = await self.client.models.list()
-                _FILE_MODELS = {
-                    item.id
-                    for item in page.data
-                    if "file"
-                    in ((item.model_extra or {}).get("architecture") or {}).get(
-                        "input_modalities", []
-                    )
-                }
-            except Exception as error:  # noqa: BLE001 - an unknown model gets the conversion
-                logger.warning("Could not list OpenRouter models: %s", error)
-                return getattr(self, "pdf_engine", "cloudflare-ai")
-        if model in _FILE_MODELS:
+        if "file" in (await self._model_inputs(model) or set()):
             return "native"
         return getattr(self, "pdf_engine", "cloudflare-ai")
+
+    async def _reads_images(self, model: str) -> bool:
+        """False only for models OpenRouter lists without image input."""
+        if not getattr(self, "openrouter", False):
+            return True
+        inputs = await self._model_inputs(model)
+        return inputs is None or "image" in inputs
 
     @property
     def _provider_label(self) -> str:
@@ -199,14 +215,19 @@ class OpenAICompatibleProvider:
         temperature: float | None = None,
         purpose: str | None = None,
     ) -> T:
-        reasoning = {"effort": self.structured_reasoning_effort} if self.openrouter else None
+        def reasoning(model: str) -> dict:
+            if not self.openrouter:
+                return {}
+            value = self._thinking(model, self.structured_reasoning_effort).reasoning()
+            return {"reasoning": value} if value else {}
+
         response = await self._with_fallback(
             lambda model: self.client.responses.parse(
                 model=model,
                 input=prompt,
                 text_format=output_schema,
                 temperature=self._temperature(temperature),
-                **({"reasoning": reasoning} if reasoning else {}),
+                **reasoning(model),
             ),
             purpose=purpose or "structured",
         )
@@ -253,13 +274,14 @@ class OpenAICompatibleProvider:
 
         async def request(model: str):
             engine = await self._pdf_engine(model)
+            thinking = self._thinking(model, "medium")
             return await self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": content}],
                 temperature=self._temperature(None),
-                max_tokens=32000,
+                max_tokens=thinking.output_tokens(32000),
                 extra_body={
-                    "reasoning": {"effort": "medium"},
+                    "reasoning": thinking.reasoning(),
                     "plugins": [{"id": "file-parser", "pdf": {"engine": engine}}],
                     "usage": {"include": True},
                 },
@@ -282,17 +304,18 @@ class OpenAICompatibleProvider:
         reasoning_effort: str | None = None,
         purpose: str | None = None,
     ) -> str:
-        request_options = (
-            {"reasoning": {"effort": reasoning_effort}}
-            if self.openrouter and reasoning_effort
-            else {}
-        )
+        def reasoning(model: str) -> dict:
+            if not (self.openrouter and reasoning_effort):
+                return {}
+            value = self._thinking(model, reasoning_effort).reasoning()
+            return {"reasoning": value} if value else {}
+
         response = await self._with_fallback(
             lambda model: self.client.responses.create(
                 model=model,
                 input=prompt,
                 temperature=self._temperature(temperature),
-                **request_options,
+                **reasoning(model),
             ),
             purpose=purpose or "text",
         )
@@ -308,17 +331,23 @@ class OpenAICompatibleProvider:
         max_results: int = 5,
     ) -> tuple[str, list[dict[str, str]]]:
         """Answer with optional thinking budget and live web search, returning citations."""
-        extra_body: dict[str, Any] = {}
-        if self.openrouter and reasoning_effort:
-            extra_body["reasoning"] = {"effort": reasoning_effort}
-        if self.openrouter and web_search:
-            extra_body["plugins"] = [{"id": "web", "max_results": max_results}]
+
+        def extra_body(model: str) -> dict[str, Any]:
+            body: dict[str, Any] = {}
+            if self.openrouter and reasoning_effort:
+                value = self._thinking(model, reasoning_effort).reasoning()
+                if value:
+                    body["reasoning"] = value
+            if self.openrouter and web_search:
+                body["plugins"] = [{"id": "web", "max_results": max_results}]
+            return {"extra_body": body} if body else {}
+
         response = await self._with_fallback(
             lambda model: self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self._temperature(temperature),
-                **({"extra_body": extra_body} if extra_body else {}),
+                **extra_body(model),
             ),
             timeout_seconds=180,
             purpose="web_answer" if web_search else "answer",
@@ -360,34 +389,42 @@ class OpenAICompatibleProvider:
             # Use OpenRouter's native chat route for Anthropic code generation.
             # The Responses compatibility route has returned incomplete code
             # despite a generous output budget; never publish its partial text.
-            content: str | list[dict[str, Any]] = prompt
+            text: str | list[dict[str, Any]] = prompt
             if cached_prefix or images:
-                content = [
+                text = [
                     {"type": "text", "text": block, "cache_control": {"type": "ephemeral"}}
                     for block in cached_prefix or []
                     if block
                 ] + [{"type": "text", "text": prompt}]
-                # Pictures the scene shows (paper figures), after the cached text.
-                content += [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": "data:image/png;base64," + base64.b64encode(image).decode()
-                        },
-                    }
-                    for image in images or []
-                ]
-            response = await self._with_fallback(
-                lambda model: self.client.chat.completions.create(
+            # Pictures (paper figures, frames of a failed render) go after the cached
+            # text, and only to models that can see them.
+            pictures = [
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/png;base64," + base64.b64encode(image).decode()
+                    },
+                }
+                for image in images or []
+            ]
+
+            async def request(model: str):
+                content = text + pictures if pictures and await self._reads_images(model) else text
+                thinking = self._thinking(model, self.reasoning_effort)
+                reasoning = thinking.reasoning()
+                return await self.client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": content}],
                     temperature=self._temperature(temperature),
-                    max_tokens=self.code_max_output_tokens,
+                    max_tokens=thinking.output_tokens(self.code_max_output_tokens),
                     extra_body={
-                        "reasoning": {"effort": self.reasoning_effort},
+                        **({"reasoning": reasoning} if reasoning else {}),
                         "usage": {"include": True},
                     },
-                ),
+                )
+
+            response = await self._with_fallback(
+                request,
                 validator=lambda result: _is_manim_code(_response_text(result)),
                 invalid_output_message="invalid generated Python",
                 timeout_seconds=self.code_timeout_seconds,
@@ -427,18 +464,23 @@ class OpenAICompatibleProvider:
                     "image_url": {"url": f"data:image/png;base64,{encoded}"},
                 }
             )
-        request_options = (
-            {"reasoning_effort": "low", "response_format": {"type": "json_object"}}
-            if getattr(self, "openrouter", False)
-            else {}
-        )
+
+        def request_options(model: str) -> dict[str, Any]:
+            if not getattr(self, "openrouter", False):
+                return {"max_tokens": 4096}
+            thinking = self._thinking(model, "low")
+            return {
+                "max_tokens": thinking.output_tokens(4096),
+                "response_format": {"type": "json_object"},
+                "extra_body": {"reasoning": thinking.reasoning()},
+            }
+
         response = await self._with_fallback(
             lambda model: self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": content}],
                 temperature=self._temperature(temperature),
-                max_tokens=4096,
-                **request_options,
+                **request_options(model),
             ),
             validator=lambda result: _has_valid_vision_json(_response_text(result)),
             invalid_output_message="invalid vision JSON",
@@ -519,16 +561,21 @@ class OpenAICompatibleProvider:
                 }
             )
         try:
-            response = await self._with_fallback(
-                lambda model: self.client.chat.completions.create(
+
+            def request(model: str):
+                thinking = self._thinking(model, self.reasoning_effort)
+                return self.client.chat.completions.create(
                     model=model,
                     messages=[{"role": "user", "content": content}],
                     temperature=self._temperature(temperature),
-                    max_tokens=4096,
-                    reasoning_effort=self.reasoning_effort,
+                    max_tokens=thinking.output_tokens(4096),
                     response_format={"type": "json_object"},
-                ),
-                validator=lambda result: _has_valid_vision_json(_response_text(result)),
+                    extra_body={"reasoning": thinking.reasoning()},
+                )
+
+            response = await self._with_fallback(
+                request,
+                validator=lambda result: _has_valid_review_json(_response_text(result)),
                 # Match the retry marker consumed by _with_fallback so malformed
                 # Lite output actually advances to the configured vision model.
                 invalid_output_message="invalid vision JSON",
@@ -582,6 +629,29 @@ class OpenAICompatibleProvider:
         parsed = _parse_json_object(raw)
         if parsed is None:
             raise RuntimeError("video verifier returned invalid JSON")
+
+        def timing(entry: dict) -> str | None:
+            """The entry's time span in scene time; None when it lies outside the excerpt."""
+            start = entry.get("timestamp_start_seconds", entry.get("start_seconds"))
+            end = entry.get("timestamp_end_seconds", entry.get("end_seconds"))
+            if start is None or end is None:
+                times = re.findall(r"\d+(?::\d+){1,2}(?:\.\d+)?", str(entry.get("timestamp", "")))
+                if len(times) >= 2:
+                    start, end = times[:2]
+            start_seconds, end_seconds = _seconds(start), _seconds(end)
+            if start_seconds is None or end_seconds is None:
+                return ""
+            if excerpt_duration_seconds is not None and (
+                start_seconds < 0
+                or end_seconds < start_seconds
+                or end_seconds > excerpt_duration_seconds + 0.5
+            ):
+                return None
+            return (
+                f" at {timestamp_offset_seconds + start_seconds:.1f}-"
+                f"{timestamp_offset_seconds + end_seconds:.1f}s"
+            )
+
         normalized = []
         for issue in parsed.get("issues", []):
             if not isinstance(issue, dict):
@@ -602,46 +672,13 @@ class OpenAICompatibleProvider:
             severity = str(issue.get("severity", "")).lower()
             if severity not in {"low", "medium", "high", "critical"}:
                 severity = "medium"
-            start = issue.get("timestamp_start_seconds", issue.get("start_seconds"))
-            end = issue.get("timestamp_end_seconds", issue.get("end_seconds"))
-            if start is None or end is None:
-                times = re.findall(r"\d+(?::\d+){1,2}(?:\.\d+)?", str(issue.get("timestamp", "")))
-                if len(times) >= 2:
-                    start, end = times[:2]
-
-            def seconds(value):
-                if isinstance(value, (int, float)):
-                    return float(value)
-                parts = str(value).split(":")
-                if not all(part.replace(".", "", 1).isdigit() for part in parts):
-                    return None
-                total = 0.0
-                for part in parts:
-                    total = total * 60 + float(part)
-                return total
-
-            start_seconds, end_seconds = seconds(start), seconds(end)
-            if (
-                excerpt_duration_seconds is not None
-                and start_seconds is not None
-                and end_seconds is not None
-                and (
-                    start_seconds < 0
-                    or end_seconds < start_seconds
-                    or end_seconds > excerpt_duration_seconds + 0.5
-                )
-            ):
+            when = timing(issue)
+            if when is None:
                 logger.info(
                     "discarding out-of-excerpt video finding",
                     extra={"excerpt_duration_seconds": excerpt_duration_seconds},
                 )
                 continue
-            timing = (
-                f" at {timestamp_offset_seconds + start_seconds:.1f}-"
-                f"{timestamp_offset_seconds + end_seconds:.1f}s"
-                if start_seconds is not None and end_seconds is not None
-                else ""
-            )
             try:
                 confidence = float(issue.get("confidence", 0.8))
             except (TypeError, ValueError):
@@ -653,12 +690,28 @@ class OpenAICompatibleProvider:
                     "confidence": min(1.0, max(0.0, confidence)),
                     "frames": [],
                     "objects": [],
-                    "description": observed + timing,
+                    "description": observed + when,
                     "suggested_repair": str(
                         issue.get(
                             "concrete_code_change",
                             issue.get("suggested_repair", "Revise the scene and rerun video QA."),
                         )
+                    ),
+                }
+            )
+        # A checklist review answers every item; the caller scores it.
+        checklist = []
+        for item in parsed.get("checklist") or []:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            passed = item.get("pass", item.get("passed", True))
+            checklist.append(
+                {
+                    "id": re.sub(r"[^a-z0-9_]", "_", str(item["id"]).lower().strip()),
+                    "passed": passed is not False and str(passed).lower() != "false",
+                    "description": str(item.get("observed") or "") + (timing(item) or ""),
+                    "suggested_repair": str(
+                        item.get("concrete_code_change") or item.get("suggested_repair") or ""
                     ),
                 }
             )
@@ -678,6 +731,7 @@ class OpenAICompatibleProvider:
             "summary": parsed.get("summary", ""),
             "makes_sense": makes_sense if isinstance(makes_sense, bool) else None,
             "issues": normalized,
+            **({"checklist": checklist} if checklist else {}),
         }
 
 
@@ -719,6 +773,30 @@ def _is_video_balance_floor_error(error: Exception) -> bool:
 def _has_valid_vision_json(response_text: str) -> bool:
     parsed = _parse_json_object(response_text)
     return isinstance(parsed, dict) and isinstance(parsed.get("issues"), list)
+
+
+def _has_valid_review_json(response_text: str) -> bool:
+    """A video review answers with an issues list, a checklist, or both."""
+    parsed = _parse_json_object(response_text)
+    return isinstance(parsed, dict) and (
+        isinstance(parsed.get("issues"), list)
+        or (isinstance(parsed.get("checklist"), list) and bool(parsed["checklist"]))
+    )
+
+
+def _seconds(value) -> float | None:
+    """Seconds from a number or an "m:ss(.f)" / "h:mm:ss" string."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if value is None:
+        return None
+    parts = str(value).split(":")
+    if not all(part.replace(".", "", 1).isdigit() for part in parts):
+        return None
+    total = 0.0
+    for part in parts:
+        total = total * 60 + float(part)
+    return total
 
 
 def _extract_python_code(value: str) -> str:

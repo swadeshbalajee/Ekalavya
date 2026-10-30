@@ -185,7 +185,7 @@ def test_fallback_outline_uses_section_headings_and_skips_references():
 async def test_pdf_request_sends_file_with_native_parser(monkeypatch):
     from scholarmotion.providers.llm import openai_compatible
 
-    monkeypatch.setattr(openai_compatible, "_FILE_MODELS", None)
+    monkeypatch.setattr(openai_compatible, "_MODEL_INPUTS", None)
     provider = OpenAICompatibleProvider(
         api_key="test", model="anthropic/x", base_url="https://openrouter.ai/api/v1"
     )

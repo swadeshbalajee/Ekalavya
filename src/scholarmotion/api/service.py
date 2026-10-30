@@ -67,6 +67,7 @@ from scholarmotion.persistence.models import (
 from scholarmotion.persistence.qdrant import QdrantConfig, QdrantUnavailable, QdrantVectorStore
 from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.providers import (
+    create_code_escalation_provider,
     create_code_provider,
     create_embedding_provider,
     create_llm_provider,
@@ -267,6 +268,8 @@ def create_pipeline(
     return ScholarMotionPipeline(
         llm=create_llm_provider(settings),
         code_llm=create_code_provider(settings),
+        code_escalation_llm=create_code_escalation_provider(settings),
+        escalate_after_failures=settings.code_escalation_after_failures,
         planner_llm=create_planner_provider(settings),
         vision=create_vision_provider(settings),
         video_verifier=create_video_provider(settings),
