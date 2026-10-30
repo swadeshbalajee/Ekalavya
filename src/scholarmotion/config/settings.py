@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # Shortest time each model call may take before the next fallback model is tried.
     # Free models can need several minutes; calls that already allow longer keep that.
     llm_request_timeout_seconds: int = Field(default=90, ge=10, le=1800)
+    # Stages that write a whole lesson in one answer (script, storyboard, lesson
+    # review) take minutes for long lectures; each of their requests gets this.
+    llm_long_request_timeout_seconds: int = Field(default=420, ge=10, le=1800)
     # Thinking budget for the main model's structured outputs (script drafts
     # and reviews). Reasoning tokens bill as output tokens.
     main_llm_structured_reasoning_effort: str = Field(default="high", pattern="^(low|medium|high)$")

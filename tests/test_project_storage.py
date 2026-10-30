@@ -2,7 +2,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from scholarmotion.persistence.storage import LocalObjectStore
-
 from scripts.migrate_project_storage import relocate
 
 

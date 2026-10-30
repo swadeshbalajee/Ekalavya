@@ -49,6 +49,7 @@ from scholarmotion.media.timeline import build_timeline, media_duration
 from scholarmotion.memory.correction_memory import CorrectionMemory
 from scholarmotion.observability.usage import set_usage_scene, usage_stage
 from scholarmotion.persistence.storage import LocalObjectStore
+from scholarmotion.providers.llm.base import call_timeout
 from scholarmotion.retrieval.hybrid_retrieval import HybridRetriever
 from scholarmotion.schemas import (
     CurriculumPlan,
@@ -465,6 +466,7 @@ class ScholarMotionPipeline:
         max_concurrent_scenes: int = 4,
         progress_callback: Callable[[str, str | None], Awaitable[None]] | None = None,
         static_layout_gate: bool = False,
+        long_call_timeout_seconds: float = 420,
     ):
         self.llm = llm
         self.code_llm = code_llm or llm
@@ -489,6 +491,7 @@ class ScholarMotionPipeline:
         # Geometry rules gate scenes only when explicitly enabled or when no
         # video reviewer is configured; otherwise they are repair hints.
         self.static_layout_gate = static_layout_gate
+        self.long_call_timeout_seconds = long_call_timeout_seconds
         # Per-scene tracks cut from one continuous lesson narration.
         self._lesson_audio: dict[str, TTSResult] = {}
         self._presentation_cache: dict[tuple, tuple[SceneSpec, str]] = {}
@@ -816,7 +819,10 @@ class ScholarMotionPipeline:
             )
         else:
             script_skills = await self.skills.context_for("research")
-            with usage_stage("script"):
+            with (
+                usage_stage("script"),
+                call_timeout(getattr(self, "long_call_timeout_seconds", 420)),
+            ):
                 blocks = await write_script(
                     self.llm,
                     curriculum,
@@ -874,7 +880,10 @@ class ScholarMotionPipeline:
                 if section_notes
                 else ""
             )
-            with usage_stage("storyboard"):
+            with (
+                usage_stage("storyboard"),
+                call_timeout(getattr(self, "long_call_timeout_seconds", 420)),
+            ):
                 storyboard = await plan_storyboard(
                     self._planner(), blocks, section_notes=section_notes, looked_up=looked_up
                 )
@@ -1761,7 +1770,10 @@ class ScholarMotionPipeline:
         )
         policy = SOURCE_POLICIES.get(getattr(self, "_source_scope", "none"), "")
         try:
-            with usage_stage("lesson_review"):
+            with (
+                usage_stage("lesson_review"),
+                call_timeout(getattr(self, "long_call_timeout_seconds", 420)),
+            ):
                 review = await reviewer.generate_structured(
                     "You review a finished narrated STEM lesson video before a student sees it. "
                     "Read the scenes in order. Report only real problems: a scene that does not "

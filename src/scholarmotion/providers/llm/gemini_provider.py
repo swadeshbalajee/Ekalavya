@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from scholarmotion.observability import record_provider_event
 
-from .base import LLMCapabilities
+from .base import LLMCapabilities, call_timeout_seconds
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -111,7 +111,7 @@ class GeminiProvider:
                         self.client.aio.models.generate_content(
                             model=active_model, contents=contents, config=config
                         ),
-                        timeout=REQUEST_TIMEOUT_SECONDS,
+                        timeout=call_timeout_seconds(REQUEST_TIMEOUT_SECONDS),
                     )
                 record_provider_event(provider=self.name, outcome="success")
                 return result

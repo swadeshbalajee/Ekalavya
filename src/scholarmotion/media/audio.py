@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 import wave
-from pathlib import Path
 from itertools import pairwise
+from pathlib import Path
 
 from scholarmotion.schemas import TimingCue, VisualBeat
 

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from scholarmotion.observability import record_provider_event
 from scholarmotion.observability.usage import record_failure, record_usage
 
-from .base import LLMCapabilities
+from .base import LLMCapabilities, call_timeout_seconds
 
 T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
@@ -113,9 +113,17 @@ class OpenAICompatibleProvider:
         for model in [self.model, *self.fallback_models]:
             started = time.perf_counter()
             try:
-                limit = max(timeout_seconds, getattr(self, "request_timeout_seconds", 90))
-                async with asyncio.timeout(limit):
-                    response = await request(model)
+                limit = call_timeout_seconds(
+                    max(timeout_seconds, getattr(self, "request_timeout_seconds", 90))
+                )
+                try:
+                    async with asyncio.timeout(limit):
+                        response = await request(model)
+                except TimeoutError as error:
+                    # asyncio's timeout has no message; say which model and how long.
+                    raise TimeoutError(
+                        f"{model} did not answer within {limit:.0f} seconds"
+                    ) from error
                 status = getattr(response, "status", None)
                 if status in {"failed", "incomplete"} or getattr(response, "error", None):
                     raise RuntimeError(

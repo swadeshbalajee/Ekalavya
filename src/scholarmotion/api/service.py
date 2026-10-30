@@ -301,6 +301,7 @@ def create_pipeline(
         max_concurrent_scenes=settings.max_concurrent_scenes,
         progress_callback=progress_callback,
         static_layout_gate=settings.static_layout_gate,
+        long_call_timeout_seconds=settings.llm_long_request_timeout_seconds,
     )
 
 
@@ -1241,7 +1242,10 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     )
                 )
                 await record_event(
-                    session, project_id, "project.failed", detail={"error": str(exc)}
+                    session,
+                    project_id,
+                    "project.failed",
+                    detail={"error": str(exc) or exc.__class__.__name__},
                 )
                 await session.commit()
             raise
