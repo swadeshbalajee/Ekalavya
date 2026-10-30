@@ -178,7 +178,13 @@ WHOLE_SCENE_REVIEW_SECONDS = 90.0
 
 
 def scene_review_prompt(
-    *, objective: str, tags: list[str], narration: str, cues: list[tuple], source_code: str
+    *,
+    objective: str,
+    tags: list[str],
+    narration: str,
+    cues: list[tuple],
+    source_code: str,
+    notes: str = "",
 ) -> str:
     """Ask a video model to check a scene item by item, as a student would watch it."""
     cue_lines = "\n".join(f"{start:.2f}-{end:.2f}s: {text}" for start, end, text in cues)
@@ -196,7 +202,8 @@ def scene_review_prompt(
         "takeaway, not a teaser or an abrupt cut.\n"
         + checklist_prompt()
         + "\n(The source is given only to suggest code changes; judge what you see and hear.)\n"
-        f"Scene objective: {objective}\nScene tags: {tags}\nNarration: {narration}\n"
+        + (f"{notes}\n" if notes else "")
+        + f"Scene objective: {objective}\nScene tags: {tags}\nNarration: {narration}\n"
         f"Estimated sentence timing (not forced alignment):\n{cue_lines}\n"
         f"Scene source code:\n{source_code}"
     )
@@ -374,7 +381,15 @@ def _attempt_rank(
 # a scene with only these (none critical) ships marked "degraded" with its
 # notes shown, instead of failing a whole lecture over one imperfect scene.
 # A scene missing its paper figure is still better than no scene once repairs run out.
-COSMETIC_ISSUE_PREFIXES = ("layout.", "video.", "vision.", "figure.")
+COSMETIC_ISSUE_PREFIXES = ("layout.", "video.", "vision.", "figure.", "correction.")
+
+
+# Findings about the checking itself, not about how the scene was written.
+_NOT_LEARNABLE = {
+    "video.verification_unavailable",
+    "video.checklist.score",
+    "video.audio_video_duration_mismatch",
+}
 
 
 def _drop_stale_prompt_title_findings(
@@ -462,6 +477,7 @@ class ScholarMotionPipeline:
         code_escalation_llm=None,
         escalate_after_failures: int = 2,
         figure_locators: tuple = (None, None),
+        correction_folder=None,
         planner_llm=None,
         vision=None,
         video_verifier=None,
@@ -488,6 +504,9 @@ class ScholarMotionPipeline:
         self.escalate_after_failures = max(1, escalate_after_failures)
         # Vision models that box the parts of paper figures a scene points at.
         self.figure_locators = figure_locators
+        # Lessons from earlier failures (memory/correction_folder.py); when set it
+        # replaces the database correction memory.
+        self.correction_folder = correction_folder
         # Light planning steps (storyboard, flow review) may use a cheaper model.
         self.planner_llm = planner_llm or llm
         self.vision = vision
@@ -837,6 +856,8 @@ class ScholarMotionPipeline:
             )
         else:
             script_skills = await self.skills.context_for("research")
+            script_terms = set(re.findall(r"[a-z]+", f"{request} {profile.topic}".lower()))
+            script_skills = "\n\n".join([script_skills, *self._corrections("script", script_terms)])
             with (
                 usage_stage("script"),
                 call_timeout(getattr(self, "long_call_timeout_seconds", 420)),
@@ -1134,10 +1155,17 @@ class ScholarMotionPipeline:
         if persist_spec:
             self._json(f"{base}/spec/v{spec.version}.json", spec)
         relevant = prefetched_corrections
-        if relevant is None:
+        if relevant is None and getattr(self, "correction_folder", None) is None:
             relevant = await self.corrections.retrieve(
                 tags=spec.tags, primitives=[beat.primitive for beat in spec.visual_beats]
             )
+        # What the correction notes are matched against: the kind of scene.
+        scene_terms = {
+            *spec.tags,
+            *(beat.primitive for beat in spec.visual_beats),
+            *(["data_plot"] if spec.data_plots else []),
+            *(["paper_figure"] if spec.paper_figures else []),
+        }
         events.extend(["scene.code_started", "scene.audio_started"])
         await self._notify_progress("scene.code_started", spec.scene_id)
         await self._notify_progress("scene.audio_started", spec.scene_id)
@@ -1187,7 +1215,7 @@ class ScholarMotionPipeline:
             generated = await generate_scene_code(
                 self.code_llm,
                 display_spec,
-                [entry.prompt_fragment() for entry in relevant],
+                self._corrections("code", scene_terms, relevant),
                 skill_context=code_skills,
                 narration=spoken_narration,
                 sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
@@ -1201,7 +1229,7 @@ class ScholarMotionPipeline:
             generated = await generate_scene_code(
                 stronger,
                 display_spec,
-                [entry.prompt_fragment() for entry in relevant],
+                self._corrections("code", scene_terms, relevant),
                 skill_context=code_skills,
                 narration=spoken_narration,
                 sentence_durations=[cue.end - cue.start for cue in audio.sentence_timings],
@@ -1209,6 +1237,8 @@ class ScholarMotionPipeline:
             )
             code_model = getattr(stronger, "model", "") or "code model"
         attempt_log: list[str] = []
+        # Problems earlier attempts failed on; those a later attempt fixed are learned.
+        failed_issues: dict[str, VerificationIssue] = {}
         best_attempt: dict | None = None
         fallback_rank = best_any_rank = None
         code_key = f"{base}/code/v{artifact_version}.py"
@@ -1317,6 +1347,20 @@ class ScholarMotionPipeline:
                     len(audio.sentence_timings) or 1,
                 ),
             }
+            folder = getattr(self, "correction_folder", None)
+            if folder is not None:
+                # Checks written for lessons learned (correction_folder/code/checks).
+                layers["corrections"] = [
+                    VerificationIssue(
+                        scene_id=spec.scene_id,
+                        category=f"correction.{entry}",
+                        severity="high",
+                        confidence=0.9,
+                        description=finding,
+                        suggested_repair=f"Follow correction {entry}.",
+                    )
+                    for entry, finding in folder.run_checks("code", generated.python_code)
+                ]
             # Geometry measurements are hints for the repair prompt, not a verdict:
             # whether a scene looks right is decided by the video reviewer, which
             # watches the whole scene with its narration.
@@ -1347,6 +1391,7 @@ class ScholarMotionPipeline:
                         narration=spoken_narration,
                         cues=[(cue.start, cue.end, cue.text) for cue in audio.sentence_timings],
                         source_code=generated.python_code,
+                        notes="\n".join(self._corrections("review", scene_terms)),
                     )
                     qa_duration = self.assembler.probe_duration(str(qa_path)) or max(
                         video_duration or 0, audio.duration_seconds
@@ -1538,7 +1583,12 @@ class ScholarMotionPipeline:
                     "checklist_score": checklist_score,
                     "model": code_model,
                 }
+            if not report.passed:
+                for issue in report.issues:
+                    if issue.severity in {"high", "critical"}:
+                        failed_issues.setdefault(issue.category, issue)
             if report.passed and result.video_path:
+                self._learn_from_repairs(project_id, spec.scene_id, failed_issues, report)
                 render_path = result.video_path
                 events.append("scene.complete")
                 await self._notify_progress(
@@ -1665,7 +1715,11 @@ class ScholarMotionPipeline:
                     generated = await generate_scene_code(
                         provider,
                         display_spec,
-                        [entry.prompt_fragment() for entry in relevant],
+                        self._corrections(
+                            "code",
+                            scene_terms | {issue.category for issue in best["report"].issues},
+                            relevant,
+                        ),
                         feedback,
                         skill_context=code_skills,
                         narration=spoken_narration,
@@ -1765,6 +1819,40 @@ class ScholarMotionPipeline:
             return still
         reasons = "; ".join(_issue_reasons(report)) if report else "unknown error"
         raise RuntimeError(f"{spec.scene_id} blocked after all repair attempts: {reasons}")
+
+    def _corrections(self, agent: str, terms: set[str], fallback=None) -> list[str]:
+        """The agent's lessons from earlier failures, as prompt text."""
+        folder = getattr(self, "correction_folder", None)
+        if folder is None:
+            return [entry.prompt_fragment() for entry in fallback or []]
+        text = folder.context(agent, terms)
+        return [text] if text else []
+
+    def _learn_from_repairs(
+        self,
+        project_id: str,
+        scene_id: str,
+        failed: dict[str, VerificationIssue],
+        final: VerificationReport,
+    ) -> None:
+        """Record each problem an earlier attempt failed on and the passing one fixed."""
+        folder = getattr(self, "correction_folder", None)
+        if folder is None or not failed:
+            return
+        remaining = {issue.category for issue in final.issues if issue.severity != "low"}
+        for category, issue in failed.items():
+            if category in remaining or category in _NOT_LEARNABLE:
+                continue
+            key = category.removeprefix("video.checklist.").removeprefix("video.")
+            promoted = folder.record(
+                "code",
+                key,
+                issue.description,
+                issue.suggested_repair,
+                scene=f"{project_id}/{scene_id}",
+            )
+            if promoted is not None:
+                logger.info("New code correction %s: %s", promoted.id, key)
 
     async def _locate_figure_parts(self, spec: SceneSpec) -> SceneSpec:
         """Box the parts of each paper figure this scene points at (once per figure)."""

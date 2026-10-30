@@ -284,3 +284,24 @@ async def test_unavailable_code_model_hands_the_scene_to_the_stronger_one(tmp_pa
 
     assert result.report.passed
     assert [model for model, _, _ in calls] == ["strong"]
+
+
+@pytest.mark.asyncio
+async def test_a_problem_a_repair_fixed_is_recorded_for_the_correction_folder(
+    tmp_path, monkeypatch
+):
+    from scholarmotion.agents import code_generator
+    from scholarmotion.memory.correction_folder import CorrectionFolder
+
+    monkeypatch.setattr(code_generator, "CODE_RETRY_DELAY_SECONDS", 0)
+    calls: list = []
+    bad = _checklist(text_overlap="12.9 sits on the axis")
+    pipeline = _escalating_pipeline(tmp_path, [bad, _checklist()], calls)
+    pipeline.correction_folder = CorrectionFolder(tmp_path / "corrections")
+    result = await pipeline.produce_scene("p", SPEC, prefetched_corrections=[])
+
+    assert result.report.passed
+    candidate = (tmp_path / "corrections/code/candidates/text-overlap.md").read_text()
+    assert "seen: 1" in candidate and "12.9 sits on the axis" in candidate
+    # The code model was shown the folder's lessons.
+    assert "LESSONS FROM EARLIER FAILURES" in calls[0][1]

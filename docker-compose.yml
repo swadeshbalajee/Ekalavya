@@ -13,8 +13,10 @@ x-app: &app
     QDRANT_URL: http://qdrant:6333
     TEMPORAL_ADDRESS: temporal:7233
     OBJECT_STORAGE_ROOT: /app/projects
+    CORRECTION_FOLDER: /app/correction_folder
   volumes:
     - ${PROJECTS_DIR:-./projects}:/app/projects
+    - ${CORRECTION_DIR:-./correction_folder}:/app/correction_folder
     - model-cache:/cache/huggingface
   restart: unless-stopped
 

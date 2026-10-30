@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "scholarmotion"
     object_storage_backend: str = "local"
     object_storage_root: Path = Path("projects")
+    # Lessons learned from failures, one folder of notes per agent (see
+    # memory/correction_folder.py). Created with starter notes when missing.
+    correction_folder: Path = Path("correction_folder")
     s3_endpoint_url: str | None = None
     s3_bucket: str = "scholarmotion"
     s3_access_key: str | None = None

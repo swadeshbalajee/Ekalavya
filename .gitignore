@@ -34,3 +34,5 @@ qdrant-storage/
 .DS_Store
 Thumbs.db
 .qdrant-initialized
+
+/correction_folder/

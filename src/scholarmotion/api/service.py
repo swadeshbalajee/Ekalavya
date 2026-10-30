@@ -31,6 +31,7 @@ from scholarmotion.media.ffmpeg import FFmpegAssembler
 from scholarmotion.media.pauses import speakable_with_pauses, with_markers
 from scholarmotion.media.subtitles import cues_to_srt, cues_to_vtt, merge_scene_cues
 from scholarmotion.media.timeline import build_timeline, media_duration
+from scholarmotion.memory.correction_folder import CorrectionFolder
 from scholarmotion.memory.correction_memory import CorrectionMemory
 from scholarmotion.observability.usage import (
     UsageLedger,
@@ -273,6 +274,7 @@ def create_pipeline(
         code_escalation_llm=create_code_escalation_provider(settings),
         escalate_after_failures=settings.code_escalation_after_failures,
         figure_locators=create_figure_locators(settings),
+        correction_folder=CorrectionFolder(settings.correction_folder),
         planner_llm=create_planner_provider(settings),
         vision=create_vision_provider(settings),
         video_verifier=create_video_provider(settings),
@@ -1157,15 +1159,6 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                             payload=issue.model_dump(mode="json"),
                         )
                     )
-                    if issue.correction_memory_candidate:
-                        await record_correction_evidence(
-                            session,
-                            runtime,
-                            category=issue.category,
-                            trigger=issue.description,
-                            recommended_fix=issue.suggested_repair,
-                            evidence={"scene_id": spec.scene_id, "source": "verifier"},
-                        )
                 await record_event(
                     session,
                     project_id,
@@ -1576,14 +1569,15 @@ async def edit_range(
                         range_end=end,
                     )
                 )
-                if result.memory_eligible:
-                    await record_correction_evidence(
-                        session,
-                        runtime,
-                        category=result.category or "feedback",
-                        trigger=instruction,
-                        recommended_fix=f"Prevent {result.category} for matching scene tags.",
-                        evidence={"scene_id": scene.scene_key, "source": "user_feedback"},
+                folder = getattr(runtime, "correction_folder", None)
+                if result.memory_eligible and folder is not None:
+                    # A learner's complaint counts as one case toward a lesson.
+                    folder.record(
+                        "code",
+                        result.category or "learner-feedback",
+                        instruction,
+                        "Changed the scene as the learner asked.",
+                        scene=f"{project_id}/{scene.scene_key}",
                     )
         await session.flush()
         render_paths: list[str] = []
