@@ -43,6 +43,13 @@ from scholarmotion.media.alignment import scene_cuts, sentence_timings_from_word
 from scholarmotion.media.audio import align_visual_beats, estimate_sentence_timings, scale_timings
 from scholarmotion.media.ffmpeg import FFmpegAssembler
 from scholarmotion.media.narration import split_lesson_wav
+from scholarmotion.media.pauses import (
+    insert_pauses,
+    map_pauses,
+    sentences,
+    speakable_with_pauses,
+    with_markers,
+)
 from scholarmotion.media.speech import to_speakable
 from scholarmotion.media.subtitles import cues_to_srt, cues_to_vtt, merge_scene_cues
 from scholarmotion.media.timeline import build_timeline, media_duration
@@ -1148,6 +1155,15 @@ class ScholarMotionPipeline:
             # The animation is timed to the measured speech instead.
         else:
             audio = existing_audio
+        if existing_audio is None and spec.pauses:
+            # Reused audio already has its pauses; a fresh recording gets them now.
+            audio = insert_pauses(
+                audio,
+                map_pauses(
+                    spec.pauses, len(sentences(spec.narration)), len(audio.sentence_timings)
+                ),
+                self.storage.local_path(f"{base}/audio/v{artifact_version}-paused.wav"),
+            )
         # Generate against measured speech, not a guessed word rate. This also
         # keeps each visual cue anchored to the narration actually synthesized.
         display_spec = display_spec.model_copy(
@@ -1986,16 +2002,22 @@ class ScholarMotionPipeline:
             await self._notify_progress(
                 "scene.review_repair", scene.spec.scene_id, {"reason": fix[:400]}
             )
-            narration = await revise_narration(
-                self.llm,
-                scene.spec.narration,
-                "A reviewer of the whole lesson found a problem in this part. " + fix,
-                learning_objective=scene.spec.learning_objective or "",
+            narration, pauses = speakable_with_pauses(
+                await revise_narration(
+                    self.llm,
+                    with_markers(scene.spec.narration, scene.spec.pauses),
+                    "A reviewer of the whole lesson found a problem in this part. " + fix,
+                    learning_objective=scene.spec.learning_objective or "",
+                )
             )
-            if narration.strip() == scene.spec.narration.strip():
+            if narration.strip() == scene.spec.narration.strip() and pauses == scene.spec.pauses:
                 return scene
             spec = scene.spec.model_copy(
-                update={"version": scene.spec.version + 1, "narration": narration}
+                update={
+                    "version": scene.spec.version + 1,
+                    "narration": narration,
+                    "pauses": pauses,
+                }
             )
             try:
                 return await self.produce_scene(

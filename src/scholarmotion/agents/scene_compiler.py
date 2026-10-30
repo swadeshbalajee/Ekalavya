@@ -33,6 +33,7 @@ def compile_scene_specs(
                 data_plots=block.data_plots,
                 paper_figures=block.paper_figures,
                 source_ids=block.source_ids,
+                pauses=block.pauses,
                 start_visual_state=[],
                 end_visual_state=(
                     ["completed takeaway visible; hold final diagram while narration concludes"]

@@ -28,6 +28,7 @@ from scholarmotion.editing.dependencies import invalidation_for
 from scholarmotion.manim_runtime.sandbox import SandboxRenderer
 from scholarmotion.media.alignment import align_words
 from scholarmotion.media.ffmpeg import FFmpegAssembler
+from scholarmotion.media.pauses import speakable_with_pauses, with_markers
 from scholarmotion.media.subtitles import cues_to_srt, cues_to_vtt, merge_scene_cues
 from scholarmotion.media.timeline import build_timeline, media_duration
 from scholarmotion.memory.correction_memory import CorrectionMemory
@@ -1406,18 +1407,23 @@ async def edit_range(
                 # Rewrite the narration to answer the request. Appending the
                 # instruction instead would make the speech engine read the
                 # request itself aloud to the student.
-                revised_narration = spec.narration
+                revised_narration, pauses = spec.narration, spec.pauses
                 if narration_changed:
-                    revised_narration = await revise_narration(
-                        runtime.llm,
-                        spec.narration,
-                        instruction,
-                        learning_objective=spec.learning_objective or "",
+                    # The reviser sees the pauses as markers, so it can keep,
+                    # move or add them ("pause before each answer").
+                    revised_narration, pauses = speakable_with_pauses(
+                        await revise_narration(
+                            runtime.llm,
+                            with_markers(spec.narration, spec.pauses),
+                            instruction,
+                            learning_objective=spec.learning_objective or "",
+                        )
                     )
                 spec = spec.model_copy(
                     update={
                         "version": spec.version + 1,
                         "narration": revised_narration,
+                        "pauses": pauses,
                         "tags": sorted(set(spec.tags + ["user_edit"])),
                     }
                 )

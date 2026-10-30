@@ -194,8 +194,9 @@ Return these decisions:
   ('edit the whole video', 'redo everything', 'make it all Tamil').
 - reply: what you say to the learner, in English, in one or two sentences.
   * For generate_video, edit_video and localize_video: confirm what will happen (which scenes or
-    the whole video, the change, the language), taking VIDEO STATUS into account: while a video
-    is still being produced, say the change can be made once it is ready.
+    the whole video, the change, the language, and for a new video its length), taking VIDEO
+    STATUS into account: while a video is still being produced, say the change can be made once
+    it is ready.
   * When you cannot tell what the learner wants changed, or a lesson from given material has
     source_scope not_said, choose action answer and ask a short clarifying question here.
   * Leave it empty for any other answer; the tutor writes that reply.
@@ -240,8 +241,19 @@ Return these decisions:
   explicit request in the latest turn first (for localize_video, the requested language), then
   a preference stated earlier in the conversation ('same language as before'), then the account
   defaults. Text and voice can differ.
-- duration_minutes: for generate_video, the length the learner asked for, at most
-  {MAX_LESSON_MINUTES:g}; empty if they did not say.
+- duration_minutes: for generate_video, in minutes (1 to {MAX_LESSON_MINUTES:g}). The length the
+  learner asked for, or one they agreed to earlier in the conversation. Otherwise choose the
+  length this request needs to be taught well and unhurried: a quick doubt or one formula 1-3, a
+  typical concept 4-8, a broad topic with several ideas 8-15, a whole chapter 15-30. Empty for a
+  whole-paper lecture with no length given (its outline sets the length).
+- LENGTH CHECK: when you would start a topic video whose length you chose yourself, and the
+  learner has neither given a length, agreed to one you proposed, nor told you to decide, choose
+  action answer instead, keep the lesson fields (canonical_request, topic, duration_minutes, ...)
+  and in reply propose the length and what it will cover, then ask whether to start or make it
+  shorter or longer ('I would make this about 7 minutes: what X is, why Y, and a worked
+  example. Shall I start, or would you like it shorter or longer?'). When the learner answers
+  that question ('yes', 'go ahead', 'make it 5'), choose generate_video with the original lesson
+  request and the agreed length.
 - topic: for generate_video, the subject in a few words ('Newton's third law').
 - learner_level: e.g. 'NCERT Class 9', 'high school', 'college', or 'general' when not stated.
 - request_type: concept_explanation, equation_explanation, figure_explanation,
@@ -325,7 +337,7 @@ def _validated(
     if result.action in {"edit_video", "localize_video"} and not video_scenes:
         result.action = "answer"
     if result.duration_minutes is not None:
-        result.duration_minutes = min(max(result.duration_minutes, 0.5), MAX_LESSON_MINUTES)
+        result.duration_minutes = min(max(result.duration_minutes, 1.0), MAX_LESSON_MINUTES)
     earlier = {item["version"] for item in video_versions or [] if not item.get("current")}
     if result.target_video_version not in earlier:
         result.target_video_version = None

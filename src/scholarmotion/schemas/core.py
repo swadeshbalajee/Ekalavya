@@ -175,6 +175,13 @@ class CurriculumPlan(BaseModel):
     references: list[SourceReference] = Field(default_factory=list)
 
 
+class Pause(BaseModel):
+    """Silence the narrator leaves after a sentence (0-based, in this scene's narration)."""
+
+    after_sentence: int = Field(ge=0)
+    seconds: float = Field(gt=0, le=10)
+
+
 class NarrationBlock(BaseModel):
     block_id: str
     chapter_id: str
@@ -189,6 +196,7 @@ class NarrationBlock(BaseModel):
     paper_figures: list[PaperFigure] = Field(default_factory=list)
     # English STEM terms this block names; kept in English when localized.
     key_terms: list[str] = Field(default_factory=list)
+    pauses: list[Pause] = Field(default_factory=list)
 
 
 class VisualBeat(BaseModel):
@@ -220,6 +228,8 @@ class SceneSpec(BaseModel):
     data_plots: list[DataPlot] = Field(default_factory=list)
     paper_figures: list[PaperFigure] = Field(default_factory=list)
     source_ids: list[str] = Field(default_factory=list)
+    # Silences inserted into the recorded narration, e.g. before an answer.
+    pauses: list[Pause] = Field(default_factory=list)
     start_visual_state: list[str] = Field(default_factory=list)
     end_visual_state: list[str] = Field(default_factory=list)
     layout: LayoutSpec = Field(default_factory=LayoutSpec)

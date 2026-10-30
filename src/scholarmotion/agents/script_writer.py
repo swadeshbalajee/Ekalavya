@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, Field
 
+from scholarmotion.media.pauses import speakable_with_pauses, with_markers
 from scholarmotion.media.speech import to_speakable
 from scholarmotion.schemas import CurriculumItem, CurriculumPlan, NarrationBlock
 
@@ -91,13 +92,26 @@ sentences with filler such as "I see" or "I show you"; most sentences simply sta
 never describe the learner as "the student" or "the viewer". If the learner asked for a
 particular voice, person, tone or style, follow it exactly."""
 
-NATURAL_ENDING = """ENDING: Finish the way a good teacher would end this particular conversation,
+NATURAL_ENDING = """ENDING: Before closing, recap the lesson's main ideas in a few sentences. Finish the way a good
+teacher would end this particular conversation,
 judging from what the learner asked. First complete the explanation; then close naturally. For
 example, after walking through a paper you might sum up its main points and thank them or invite
 questions; after answering a doubt or a follow-up you might check whether that answers their
 question; after a new topic you might recap the key idea and invite them to ask if anything is
 unclear. These are examples, not a template: choose and word the ending yourself so it fits the
 ask. Do not tease new content or promise another video."""
+
+
+PACING = """PACING AND FLOW: Teach unhurried, the way a good teacher talks a student through an
+idea, not the way a summary lists facts. Give each idea room: say it, show why it is true, connect
+it to something the learner already knows, then move on; fewer ideas explained well beat many
+mentioned. Be creative: open with a situation or question that makes the learner curious, use
+vivid concrete examples, ask the learner small questions, and vary the rhythm of the sentences.
+Leave breathing space: where a teacher would really stop, after a question you put to the
+learner, before revealing its answer, or after a key result, write a pause marker such as
+[pause 2s] (1 to 4 seconds; never after every sentence). A pause counts toward its segment's time.
+Every segment after the first opens with a short bridge from where the previous one left off
+("So far we have seen ...; now ..."), and ends so the next one follows naturally."""
 
 
 def _constrain_spoken_word_budget(text: str, target_seconds: float) -> str:
@@ -140,7 +154,7 @@ presentation metadata and must not change this English source script.
 State the actual physics — the definition, the equation, the reasoning, a concrete worked example —
 using the supplied textbook facts as grounding. Teach the concept directly, as a teacher
 explaining it out loud: do not spend sentences announcing what the lesson will cover ("in this
-video we will explore...") or describing the screen layout; every sentence should teach.
+video we will explore...") or describing the screen layout.
 This narration is read aloud by a speech engine and shown as subtitles, so write it as plain
 spoken words only. Never use LaTeX or any math markup: no $...$, no backslash commands, no
 ^ or _ for powers and subscripts. Say "p equals q times two a", "one over r cubed",
@@ -251,7 +265,7 @@ def _build_prompt(
     )
     fallback = _fallback_narration(item, target_words=target_words, is_closing=is_closing)
     return (
-        f"{RULES}\n{TEACHER_VOICE}\n\n{skill_context}\n\n"
+        f"{RULES}\n{TEACHER_VOICE}\n{PACING}\n\n{skill_context}\n\n"
         f"Learner level: {audience}.\n"
         f"Learner's original request: {learner_request or '(a short request for this topic)'}\n"
         "STEM EQUATIONS: use exact notation from the retrieved evidence when available.\n"
@@ -373,7 +387,7 @@ async def write_script(
             else ""
         )
         prompt = (
-            f"{RULES}\n{TEACHER_VOICE}\n{NATURAL_ENDING}\n"
+            f"{RULES}\n{TEACHER_VOICE}\n{PACING}\n{NATURAL_ENDING}\n"
             f"{PAPER_LECTURE_RULES if paper_lecture else ''}{plan_notes}\n"
             f"{SOURCE_POLICIES.get(source_scope, '')}\n{skill_context}\n"
             f"Learner: {learner_request}\nLevel: {learner_level}\n"
@@ -409,11 +423,13 @@ async def write_script(
                     "natural ending",
                 ],
             }
+            spoken = [speakable_with_pauses(s.narration, to_speakable) for s in draft.segments]
             blocks = [
                 NarrationBlock(
                     block_id=f"N{i:02d}",
                     chapter_id=f"C{chapter:02d}",
-                    text=to_speakable(segment.narration),
+                    text=spoken[i - 1][0],
+                    pauses=spoken[i - 1][1],
                     title=segment.title,
                     learning_objective=segment.learning_objective or item.objective,
                     source_ids=item.source_ids,
@@ -439,6 +455,7 @@ async def write_script(
         try:
             draft = await provider.generate_structured(prompt, LessonScript)
             review = ScriptReview(approved=False)
+            polished = False
             for revision in range(SCRIPT_REVIEW_ROUNDS):
                 if len(draft.segments) != len(slots) or any(
                     not s.narration.strip() for s in draft.segments
@@ -464,18 +481,24 @@ async def write_script(
                     "'as an AI', or notes to the viewer about the video itself. When a SOURCE "
                     "POLICY is given, set blocking=true for content it does not allow. "
                     "Narration must verbalize STEM notation naturally, never "
-                    "read asterisks or LaTeX commands. List specific problems; approve when "
-                    "nothing blocking remains.\n"
-                    + prompt
-                    + "\nSCRIPT:\n"
-                    + draft.model_dump_json(),
+                    "read asterisks or LaTeX commands. Judge the flow as a student would hear it, "
+                    "and set blocking=true when the lesson feels rushed or disjointed: a segment "
+                    "that jumps to a new idea with no bridge from the previous one, several ideas "
+                    "named in a row without any of them being explained, or no recap of the main "
+                    "ideas before the ending. Pause markers such as [pause 2s] are intended "
+                    "silences; report only ones that interrupt a sentence or appear after nearly "
+                    "every sentence. List specific problems; approve when nothing blocking "
+                    "remains.\n" + prompt + "\nSCRIPT:\n" + draft.model_dump_json(),
                     ScriptReview,
                 )
                 if review_callback is not None:
                     await review_callback(revision + 1, review)
-                if (review.approved and not review.blocking) or not review.problems:
+                minor_only = not review.blocking
+                # Minor notes get one polishing revision; after that they ship as notes.
+                if not review.problems or (minor_only and polished):
                     return accept(review, revision, draft)
                 if revision < SCRIPT_REVIEW_ROUNDS - 1:
+                    polished = polished or minor_only
                     draft = await provider.generate_structured(
                         prompt
                         + "\nRevise this draft:\n"
@@ -513,6 +536,7 @@ async def write_script(
             # is both spoken and subtitled, so normalise it rather than trust it.
             equations: list[str] = []
             key_terms: list[str] = []
+            pauses = []
             if getattr(provider, "name", "") == "mock":
                 text = _fallback_narration(
                     item,
@@ -523,7 +547,7 @@ async def write_script(
             else:
                 try:
                     structured = await provider.generate_structured(prompt, ScriptSegment)
-                    text = to_speakable(structured.narration.strip())
+                    text, pauses = speakable_with_pauses(structured.narration.strip(), to_speakable)
                     equations = [value.strip() for value in structured.equations if value.strip()]
                     key_terms = _key_terms(structured.key_terms)
                 except (AttributeError, NotImplementedError):
@@ -543,6 +567,7 @@ async def write_script(
             if not text:
                 text = f"{item.title}. {item.objective}"
             text = _constrain_spoken_word_budget(text, duration)
+            kept = len(re.split(r"(?<=[.!?])\s+", text.strip()))
             blocks.append(
                 NarrationBlock(
                     block_id=f"N{len(blocks) + 1:02d}",
@@ -554,6 +579,7 @@ async def write_script(
                     defined_symbols={},
                     equations=equations,
                     key_terms=key_terms,
+                    pauses=[pause for pause in pauses if pause.after_sentence < kept],
                 )
             )
     _attach_unclaimed_plots(blocks, curriculum)
@@ -574,6 +600,9 @@ otherwise, for example asking for a slower or more detailed explanation.
 
 You are the learner's teacher: speak in the first person to "you", never about a narrator, a
 presenter or the video in the third person.
+A marker such as [pause 3s] is a silence the teacher leaves (for example before revealing an
+answer). Keep the markers in the narration unless the request is about them, and add one where
+the request asks for a pause, e.g. after each question and before its answer.
 Write natural spoken English only. Never acknowledge the request, never say "as you asked" or
 "let me explain again", and never mention that this is a revision. The student should simply hear a
 better explanation. Never use LaTeX or math markup: no $...$, no backslash commands, no ^ or _.
@@ -610,4 +639,5 @@ async def revise_narration(
         revised = ""
     if not revised:
         return narration
-    return to_speakable(revised) if revised else narration
+    # Pause markers the reviser kept or added survive the speech clean-up.
+    return with_markers(*speakable_with_pauses(revised, to_speakable))

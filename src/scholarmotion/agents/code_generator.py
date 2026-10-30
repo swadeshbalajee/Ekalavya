@@ -18,6 +18,7 @@ from scholarmotion.media.math_notation import (
     contains_native_prose,
     needs_math_typesetting,
 )
+from scholarmotion.media.pauses import map_pauses, sentences
 from scholarmotion.schemas import GeneratedSceneCode, SceneSpec
 
 logger = logging.getLogger(__name__)
@@ -704,8 +705,18 @@ async def generate_scene_code(
         cue_texts = [spoken] if not durations else cue_texts[: len(durations)]
         durations = durations or [max(1.0, spec.duration_target_seconds)]
         cue_texts += [""] * (len(durations) - len(cue_texts))
+    silences = {
+        pause.after_sentence: pause.seconds
+        for pause in map_pauses(spec.pauses, len(sentences(spec.narration)), len(cue_texts))
+    }
     cue_plan = "\n".join(
         f'  cue {index}: {seconds:.2f}s  "{text}"'
+        + (
+            f" (the voice then stays silent for {silences[index - 1]:g}s: hold this picture; do "
+            "not show the next sentence's content, such as an answer, until the next cue)"
+            if index - 1 in silences
+            else ""
+        )
         for index, (seconds, text) in enumerate(zip(durations, cue_texts, strict=True), 1)
     )
     template = choose_template(
