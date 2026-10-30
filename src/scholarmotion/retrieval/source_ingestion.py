@@ -109,10 +109,7 @@ async def index_source(
 
 
 def parse_stored_pdf(store, key: str, project_id, document_id) -> Callable[[], ParsedPaper]:
-    return lambda: PaperParser().parse(
-        store.local_path(key),
-        asset_dir=store.local_path(f"{project_id}/sources/assets/{document_id}"),
-    )
+    return lambda: PaperParser().parse(store.local_path(key))
 
 
 async def _free_key(session, project_id: UUID, filename: str, url: str) -> str:

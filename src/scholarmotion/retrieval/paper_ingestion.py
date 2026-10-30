@@ -107,26 +107,11 @@ class PaperParser:
         ]
         return title, authors
 
-    def parse(self, path: str | Path, *, asset_dir: str | Path | None = None) -> ParsedPaper:
+    def parse(self, path: str | Path) -> ParsedPaper:
+        # Text only: figures shown in lessons are cropped from rendered pages
+        # (paper_figures), so embedded images are never decoded here.
         reader = PdfReader(str(path))
         pages = [clean_text(page.extract_text()).strip() for page in reader.pages]
-        assets: list[dict] = []
-        if asset_dir is not None:
-            output = Path(asset_dir)
-            output.mkdir(parents=True, exist_ok=True)
-            for page_number, page in enumerate(reader.pages, 1):
-                for image_index, image in enumerate(getattr(page, "images", []), 1):
-                    original_name = Path(getattr(image, "name", "image.bin")).name
-                    suffix = Path(original_name).suffix or ".bin"
-                    target = output / f"page-{page_number:04d}-image-{image_index:03d}{suffix}"
-                    target.write_bytes(image.data)
-                    assets.append(
-                        {
-                            "page": page_number,
-                            "original_name": original_name,
-                            "path": str(target),
-                        }
-                    )
         first_lines = [
             line.strip()
             for line in (pages[0] if pages else Path(path).stem).splitlines()
@@ -191,7 +176,7 @@ class PaperParser:
             authors,
             abstract,
             chunks,
-            {"pages": len(pages), "extracted_figure_assets": assets},
+            {"pages": len(pages)},
         )
 
     @staticmethod

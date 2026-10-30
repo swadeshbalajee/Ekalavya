@@ -182,11 +182,28 @@ def test_fallback_outline_uses_section_headings_and_skips_references():
 
 
 @pytest.mark.asyncio
-async def test_pdf_request_sends_file_with_native_parser():
+async def test_pdf_request_sends_file_with_native_parser(monkeypatch):
+    from scholarmotion.providers.llm import openai_compatible
+
+    monkeypatch.setattr(openai_compatible, "_FILE_MODELS", None)
     provider = OpenAICompatibleProvider(
         api_key="test", model="anthropic/x", base_url="https://openrouter.ai/api/v1"
     )
     captured = {}
+
+    async def models():
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(
+                    id=model_id,
+                    model_extra={"architecture": {"input_modalities": modalities}},
+                )
+                for model_id, modalities in [
+                    ("anthropic/x", ["text", "file"]),
+                    ("deepseek/text-only", ["text"]),
+                ]
+            ]
+        )
 
     async def create(**kwargs):
         captured.update(kwargs)
@@ -198,6 +215,7 @@ async def test_pdf_request_sends_file_with_native_parser():
     provider.client = SimpleNamespace(
         base_url="https://openrouter.ai/api/v1",
         chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        models=SimpleNamespace(list=models),
     )
     outline = await provider.generate_structured_from_pdf("plan", b"%PDF", PaperOutline)
     file_part = captured["messages"][0]["content"][0]
@@ -205,6 +223,11 @@ async def test_pdf_request_sends_file_with_native_parser():
     assert file_part["file"]["file_data"].startswith("data:application/pdf;base64,")
     assert captured["extra_body"]["plugins"][0]["pdf"]["engine"] == "native"
     assert outline.chapters[2].plots[0].plot_id == "P1"
+
+    # A model that cannot read files gets OpenRouter's text conversion instead.
+    provider.model = "deepseek/text-only"
+    await provider.generate_structured_from_pdf("plan", b"%PDF", PaperOutline)
+    assert captured["extra_body"]["plugins"][0]["pdf"]["engine"] == "cloudflare-ai"
 
 
 @pytest.mark.asyncio

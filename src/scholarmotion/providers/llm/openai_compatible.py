@@ -20,6 +20,8 @@ from .base import LLMCapabilities
 
 T = TypeVar("T", bound=BaseModel)
 logger = logging.getLogger(__name__)
+# OpenRouter models that accept files (PDFs) as input, listed once per process.
+_FILE_MODELS: set[str] | None = None
 
 
 class OpenAICompatibleProvider:
@@ -39,6 +41,7 @@ class OpenAICompatibleProvider:
         structured_reasoning_effort: str = "high",
         default_temperature: float = 0.7,
         request_timeout_seconds: int = 90,
+        pdf_engine: str = "cloudflare-ai",
     ):
         try:
             from openai import AsyncOpenAI
@@ -60,6 +63,7 @@ class OpenAICompatibleProvider:
         self.code_max_output_tokens = code_max_output_tokens
         self.structured_reasoning_effort = structured_reasoning_effort
         self.default_temperature = default_temperature
+        self.pdf_engine = pdf_engine
         self.fallback_models = [
             candidate for candidate in (fallback_models or []) if candidate != model
         ]
@@ -68,6 +72,28 @@ class OpenAICompatibleProvider:
     def _temperature(self, value: float | None) -> float:
         """The caller's temperature, else the configured agent temperature."""
         return getattr(self, "default_temperature", 0.7) if value is None else value
+
+    async def _pdf_engine(self, model: str) -> str:
+        """OpenRouter's PDF engine for ``model``: the PDF itself when the model reads
+        files, otherwise the configured text conversion."""
+        global _FILE_MODELS
+        if _FILE_MODELS is None:
+            try:
+                page = await self.client.models.list()
+                _FILE_MODELS = {
+                    item.id
+                    for item in page.data
+                    if "file"
+                    in ((item.model_extra or {}).get("architecture") or {}).get(
+                        "input_modalities", []
+                    )
+                }
+            except Exception as error:  # noqa: BLE001 - an unknown model gets the conversion
+                logger.warning("Could not list OpenRouter models: %s", error)
+                return getattr(self, "pdf_engine", "cloudflare-ai")
+        if model in _FILE_MODELS:
+            return "native"
+        return getattr(self, "pdf_engine", "cloudflare-ai")
 
     @property
     def _provider_label(self) -> str:
@@ -217,18 +243,22 @@ class OpenAICompatibleProvider:
                 return False
             return True
 
-        response = await self._with_fallback(
-            lambda model: self.client.chat.completions.create(
+        async def request(model: str):
+            engine = await self._pdf_engine(model)
+            return await self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": content}],
                 temperature=self._temperature(None),
                 max_tokens=32000,
                 extra_body={
                     "reasoning": {"effort": "medium"},
-                    "plugins": [{"id": "file-parser", "pdf": {"engine": "native"}}],
+                    "plugins": [{"id": "file-parser", "pdf": {"engine": engine}}],
                     "usage": {"include": True},
                 },
-            ),
+            )
+
+        response = await self._with_fallback(
+            request,
             validator=valid,
             invalid_output_message="invalid model response",
             timeout_seconds=420,

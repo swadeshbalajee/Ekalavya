@@ -268,6 +268,7 @@ def _create_llm(
             structured_reasoning_effort=structured_reasoning_effort,
             default_temperature=settings.agent_temperature,
             request_timeout_seconds=settings.llm_request_timeout_seconds,
+            pdf_engine=settings.openrouter_pdf_engine,
         )
     raise ValueError(f"unknown LLM provider: {name}")
 
