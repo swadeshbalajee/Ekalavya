@@ -10,6 +10,7 @@ from scholarmotion.persistence.models import UsageEvent
 # (substring of the purpose or stage, dashboard module), first match wins.
 _MODULES = (
     ("code_repair", "Code repair"),
+    ("figure_check", "Figure checks"),
     ("video_review", "Video review"),
     ("vision_review", "Vision review"),
     ("lesson_review", "Lesson review"),

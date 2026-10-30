@@ -59,7 +59,9 @@ class Settings(BaseSettings):
     main_llm_structured_reasoning_effort: str = Field(default="high", pattern="^(low|medium|high)$")
     # How OpenRouter turns a paper PDF into text for models that cannot read
     # files themselves; models that can always get the PDF as is.
-    openrouter_pdf_engine: str = Field(default="cloudflare-ai", pattern="^(cloudflare-ai|mistral-ocr)$")
+    openrouter_pdf_engine: str = Field(
+        default="cloudflare-ai", pattern="^(cloudflare-ai|mistral-ocr)$"
+    )
     # A cheaper model for light planning steps: intent/language preparation,
     # storyboard beats and the final lesson-flow review. Unset uses the main
     # model. It shares the main model's provider, key and base URL.

@@ -145,6 +145,7 @@ def _fallback_video_findings(issues: list[dict]) -> list[dict]:
 
 
 from scholarmotion.verification.aggregator import aggregate_reports
+from scholarmotion.verification.figures import verify_paper_figures_shown
 from scholarmotion.verification.layout import verify_layout
 from scholarmotion.verification.math import verify_required_equations
 from scholarmotion.verification.pedagogy import verify_pedagogy, verify_rendered_storyboard
@@ -364,7 +365,8 @@ def _attempt_rank(report: VerificationReport) -> tuple[int, int, float]:
 # Findings about how a rendered scene looks or flows. When repairs run out,
 # a scene with only these (none critical) ships marked "degraded" with its
 # notes shown, instead of failing a whole lecture over one imperfect scene.
-COSMETIC_ISSUE_PREFIXES = ("layout.", "video.", "vision.")
+# A scene missing its paper figure is still better than no scene once repairs run out.
+COSMETIC_ISSUE_PREFIXES = ("layout.", "video.", "vision.", "figure.")
 
 
 def _drop_stale_prompt_title_findings(
@@ -1253,6 +1255,7 @@ class ScholarMotionPipeline:
                     spec.scene_id, spec.equations, generated.python_code
                 ),
                 "semantic": verify_source_grounding(display_spec, known_source_ids or set()),
+                "figures": verify_paper_figures_shown(spec, generated.python_code),
                 "cue_timing": verify_cue_overflow(
                     spec.scene_id,
                     _read_log(result.log_path),

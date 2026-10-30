@@ -149,3 +149,51 @@ def extract_figures(
     finally:
         document.close()
     return crops
+
+
+def render_page(pdf_path: str | Path, page: int, *, scale: float = 1.5) -> bytes:
+    """One whole page (1-based) as PNG bytes, for checking a crop against its page."""
+    from io import BytesIO
+
+    import pypdfium2 as pdfium
+
+    document = pdfium.PdfDocument(str(pdf_path))
+    try:
+        image = document[page - 1].render(scale=scale).to_pil()
+    finally:
+        document.close()
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def crop_page_region(
+    pdf_path: str | Path, crop: FigureCrop, box: tuple[float, float, float, float]
+) -> FigureCrop:
+    """Re-crop ``crop`` to ``box`` (x0, y0, x1, y1 as fractions of its page, from the
+    top-left), overwriting its PNG."""
+    import pypdfium2 as pdfium
+
+    x0, y0, x1, y1 = (min(1.0, max(0.0, float(value))) for value in box)
+    if x1 <= x0 or y1 <= y0:
+        raise ValueError(f"empty figure box {box}")
+    document = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = document[crop.page - 1]
+        width, height = page.get_size()
+        # PDFium crops are margins from the left, bottom, right and top edges.
+        image = page.render(
+            scale=RENDER_SCALE,
+            crop=(x0 * width, (1 - y1) * height, (1 - x1) * width, y0 * height),
+        ).to_pil()
+    finally:
+        document.close()
+    image.save(crop.path)
+    return FigureCrop(
+        label=crop.label,
+        page=crop.page,
+        caption=crop.caption,
+        path=crop.path,
+        width=image.width,
+        height=image.height,
+    )

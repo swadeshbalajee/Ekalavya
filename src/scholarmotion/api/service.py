@@ -79,6 +79,7 @@ from scholarmotion.providers import (
 )
 from scholarmotion.retrieval.collection import plan_queries
 from scholarmotion.retrieval.collection import search_web as search_web_for
+from scholarmotion.retrieval.figure_check import check_figure_crops
 from scholarmotion.retrieval.hybrid_retrieval import (
     HybridRetriever,
     RetrievedChunk,
@@ -625,6 +626,28 @@ async def _outline_lecture_paper(
         except Exception as error:  # noqa: BLE001 - figures enrich a lecture; never block it
             logger.warning("Could not crop figures from %s: %s", paper.title, error)
             crops = []
+        cropped = sorted(crop.label for crop in crops)
+        with usage_stage("figure_check"):
+            crops, checks = await check_figure_crops(
+                runtime.vision, runtime.storage.local_path(paper.uri), crops
+            )
+        missing = sorted(labels - set(cropped))
+        if missing:
+            logger.warning("No crop found for %s in %s", ", ".join(missing), paper.title)
+        await record_event(
+            session,
+            project.id,
+            "paper.figures",
+            detail={
+                "requested": sorted(labels),
+                "cropped": cropped,
+                "not_found": missing,
+                "checks": {check.label: check.outcome for check in checks},
+                "dropped": {
+                    check.label: check.reason for check in checks if check.outcome == "dropped"
+                },
+            },
+        )
         outline.figure_crops = [
             PaperFigure(
                 label=crop.label,
