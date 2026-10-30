@@ -187,6 +187,7 @@ def scene_review_prompt(
     source_code: str,
     notes: str = "",
     extra: tuple = (),
+    measured: str = "",
 ) -> str:
     """Ask a video model to check a scene item by item, as a student would watch it."""
     cue_lines = "\n".join(f"{start:.2f}-{end:.2f}s: {text}" for start, end, text in cues)
@@ -203,6 +204,7 @@ def scene_review_prompt(
         "easy to miss in motion. If lesson_closing is tagged, the scene must end on a settled "
         "takeaway, not a teaser or an abrupt cut.\n"
         + checklist_prompt(extra)
+        + (f"\n{measured}\n" if measured else "")
         + "\n(The source is given only to suggest code changes; judge what you see and hear.)\n"
         + (f"{notes}\n" if notes else "")
         + f"Scene objective: {objective}\nScene tags: {tags}\nNarration: {narration}\n"
@@ -280,6 +282,58 @@ def _verify_render_layout(scene_id: str, result: RenderResult) -> list[Verificat
             issue.suggested_repair = prefix + issue.suggested_repair
             issues.append(issue)
     return issues
+
+
+def measured_overlaps(scene_id: str, bounds_path: str | None, limit: int = 6) -> str:
+    """Where rendering measured text overlapping something, as places for the reviewer to look.
+
+    Geometry cannot tell a label put on its own bar on purpose from a label
+    covering a drawing, so it does not decide; but a reviewer watching the
+    whole video misses small collisions, so it is told exactly where they are.
+    """
+    if not bounds_path:
+        return ""
+    try:
+        snapshots = json.loads(Path(bounds_path).read_text())
+    except (OSError, TypeError, json.JSONDecodeError):
+        return ""
+    found: dict[str, dict] = {}
+    for step, snapshot in enumerate(snapshots, 1):
+        objects = {item["name"]: ObjectBounds(**item) for item in snapshot}
+        for issue in verify_layout(scene_id, list(objects.values())):
+            if issue.category != "layout.overlap" or len(issue.objects) != 2:
+                continue
+            first, second = (objects.get(name) for name in issue.objects)
+            for text, other in ((first, second), (second, first)):
+                if text is None or other is None or not text.label:
+                    continue
+                entry = found.setdefault(text.label, {"steps": set(), "with": {}})
+                entry["steps"].add(step)
+                kind = (
+                    f"text '{other.label}'" if other.label else other.name.rsplit("_", 1)[0].lower()
+                )
+                entry["with"].setdefault(kind, set()).add(other.name)
+    if not found:
+        return ""
+    total = len(snapshots)
+    lines = []
+    for label, entry in list(found.items())[:limit]:
+        steps = sorted(entry["steps"])
+        others = ", ".join(
+            f"{len(names)} {kind}s" if len(names) > 1 else kind
+            for kind, names in entry["with"].items()
+        )
+        span = f"step {steps[0]}" if len(steps) == 1 else f"steps {steps[0]}-{steps[-1]}"
+        final = " (the final frame)" if steps[-1] == total else ""
+        lines.append(f"- text '{label}' overlaps {others} at {span} of {total}{final}")
+    return (
+        "MEASURED OVERLAPS (exact positions recorded while rendering; step k is the settled "
+        "picture after the k-th animation; label spaces are removed):\n"
+        + "\n".join(lines)
+        + "\nLook at each of these spots in the video and stills. Fail text_overlap if the text "
+        "is hard to read there or covers part of the drawing; a label placed on its own bar or "
+        "shape on purpose and still easy to read is fine."
+    )
 
 
 class LessonIssue(BaseModel):
@@ -1432,6 +1486,7 @@ class ScholarMotionPipeline:
                         source_code=generated.python_code,
                         notes="\n".join(self._corrections("review", scene_terms)),
                         extra=review_extra,
+                        measured=measured_overlaps(spec.scene_id, result.bounds_path),
                     )
                     qa_duration = self.assembler.probe_duration(str(qa_path)) or max(
                         video_duration or 0, audio.duration_seconds

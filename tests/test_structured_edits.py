@@ -190,6 +190,15 @@ def test_the_planner_cannot_name_scenes_that_do_not_exist_or_undo_to_nothing():
     assert undo.action == "answer"
 
 
+def test_a_plural_is_respelled_and_restored_like_its_word():
+    from scholarmotion.media.pronunciation import uses_any
+
+    assert uses_any("Short wavelengths scatter.", {"wavelength": "wave-length"})
+    said = respell("Short wavelengths, one wavelength.", {"wavelength": "wave-length"})
+    assert said == "Short wave-lengths, one wave-length."
+    assert not uses_any("Wavelengthy prose.", {"wavelength": "wave-length"})
+
+
 def test_pronunciation_changes_the_recording_not_the_subtitles():
     said = respell("Euler's formula, by EULER.", {"Euler": "Oiler"})
     assert said == "Oiler's formula, by Oiler."
@@ -481,3 +490,34 @@ async def test_a_failed_scene_leaves_the_video_unchanged(database, tmp_path, mon
             if s.timeline_start is not None
         )
         assert keys == ["S01", "S02", "S03"]
+
+
+def test_a_word_the_lesson_never_says_is_not_respelled_or_guessed_into_a_scene():
+    from scholarmotion.api.tutor import checked_pronunciations
+
+    narrations = {
+        "S01": "Euler found it.",
+        "S02": "Tiny gas molecules scatter light.",
+        "S03": "So the sky is blue.",
+    }
+    plan = EditPlan(
+        edits=[
+            SceneEdit(op="change", scene="S02", instruction="Say Rayleigh as ray-lee."),
+            SceneEdit(op="change", scene="S01", instruction="Say Euler as Oiler."),
+            SceneEdit(op="change", scene="S03", instruction="slower"),
+        ],
+        pronunciations={"Rayleigh": "ray-lee", "Euler": "Oiler"},
+    )
+    checked, saying, missing = checked_pronunciations(plan, narrations)
+    # Rayleigh is never said: no respelling, and the guessed scene is left alone.
+    assert checked.pronunciations == {"Euler": "Oiler"} and missing == ["Rayleigh"]
+    assert saying == ["S01"]
+    # Respelling rebuilds S01 by itself; only the unrelated change stays.
+    assert [edit.scene for edit in checked.edits] == ["S03"]
+
+    only = EditPlan(
+        edits=[SceneEdit(op="change", scene="S02", instruction="Say Rayleigh as ray-lee.")],
+        pronunciations={"Rayleigh": "ray-lee"},
+    )
+    checked, saying, missing = checked_pronunciations(only, narrations)
+    assert not checked.edits and not checked.pronunciations and missing == ["Rayleigh"]

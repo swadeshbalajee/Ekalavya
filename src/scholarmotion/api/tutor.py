@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from scholarmotion.agents.lesson_preparation import SceneEdit, prepare_lesson
 from scholarmotion.config import Settings
+from scholarmotion.media.pronunciation import uses_any
 from scholarmotion.persistence.models import (
     Project,
     ProjectArtifact,
     Scene,
+    SceneSpecification,
     SourceChunk,
     SourceDocument,
     TimelineSegment,
@@ -575,11 +577,82 @@ def edit_plan_for(preparation, scenes: list[Scene], canonical: str) -> EditPlan:
     return plan
 
 
+def _edit_reply(
+    reply: str, plan: EditPlan, numbers: dict[str, int], saying: list[str], missing: list[str]
+) -> str:
+    """The planner's own reply, unless the narration check changed what will be rebuilt."""
+    if not plan.pronunciations and not missing:
+        return reply or f"I will {plan.describe(numbers)}."
+    text = f"I will {plan.describe(numbers)}"
+    where = sorted(numbers[key] for key in saying if key in numbers)
+    if where:
+        label = "scene" if len(where) == 1 else "scenes"
+        text += f" in {label} {', '.join(map(str, where))}, where it is said"
+    text += "."
+    if missing:
+        text += " " + " and ".join(f"'{word}'" for word in missing) + " isn't said in this lesson."
+    return text
+
+
+async def _scene_narrations(session, project_id) -> dict[str, str]:
+    """Each scene's current narration, by scene key."""
+    rows = await session.execute(
+        select(Scene.scene_key, SceneSpecification.payload)
+        .join(SceneSpecification, SceneSpecification.scene_id == Scene.id)
+        .where(Scene.project_id == project_id, SceneSpecification.active.is_(True))
+    )
+    return {key: (payload or {}).get("narration", "") for key, payload in rows}
+
+
+def checked_pronunciations(
+    plan: EditPlan, narrations: dict[str, str]
+) -> tuple[EditPlan, list[str], list[str]]:
+    """The plan with only words the narration really says, the scenes saying them, and the rest.
+
+    The planner sees scene titles, not narration, so it guesses which scenes say
+    a word. The edit already rebuilds every scene that uses a respelled word; a
+    "change" about the word would only send that narration to the rewriter,
+    which may reword the scene or add the word to satisfy the request.
+    """
+    words = dict(plan.pronunciations)
+    used = {
+        word: spoken
+        for word, spoken in words.items()
+        if any(uses_any(text, [word]) for text in narrations.values())
+    }
+    saying = [key for key, text in narrations.items() if uses_any(text, used)]
+    edits = [
+        edit
+        for edit in plan.edits
+        if not (edit.op == "change" and uses_any(edit.instruction, words))
+    ]
+    missing = [word for word in words if word not in used]
+    return plan.model_copy(update={"edits": edits, "pronunciations": used}), saying, missing
+
+
 async def _edit(session, translator, project, preparation, scenes, canonical) -> TutorDecision:
     plan = edit_plan_for(preparation, scenes, canonical)
+    saying: list[str] = []
+    missing: list[str] = []
+    if plan.pronunciations:
+        plan, saying, missing = checked_pronunciations(
+            plan, await _scene_narrations(session, project.id)
+        )
+        if missing and not plan.edits and not plan.pronunciations:
+            quoted = " or ".join(f"'{word}'" for word in missing)
+            return await _save_assistant(
+                session,
+                translator,
+                project,
+                canonical=f"{quoted} isn't said anywhere in this lesson, so there is nothing to "
+                "re-pronounce. Which word did the narrator say wrongly?",
+                action="answer",
+            )
     if plan.edits or plan.pronunciations:
         numbers = {scene.scene_key: index for index, scene in enumerate(scenes, 1)}
-        named = [scene for scene in scenes if scene.scene_key in set(plan.touched())] or scenes
+        named = [
+            scene for scene in scenes if scene.scene_key in set(plan.touched()) | set(saying)
+        ] or scenes
         # A time range the learner gave is shown as given, not widened to whole scenes.
         span = None if preparation.edits else edit_range_for(preparation, scenes)
         start, end = span or (
@@ -590,7 +663,7 @@ async def _edit(session, translator, project, preparation, scenes, canonical) ->
             session,
             translator,
             project,
-            canonical=preparation.reply or f"I will {plan.describe(numbers)}.",
+            canonical=_edit_reply(preparation.reply, plan, numbers, saying, missing),
             action="edit_range",
             start=start,
             end=end,

@@ -14,7 +14,9 @@ from scholarmotion.schemas import TTSResult
 
 
 def _pattern(word: str) -> re.Pattern:
-    return re.compile(rf"(?<!\w){re.escape(word)}(?!\w)", re.IGNORECASE)
+    # A plural is the same word said the same way: "wavelengths" respells as
+    # "wave-lengths", the ending kept as written.
+    return re.compile(rf"(?<!\w){re.escape(word)}(?=(?:e?s)?(?!\w))", re.IGNORECASE)
 
 
 def respell(text: str, pronunciations: dict[str, str]) -> str:

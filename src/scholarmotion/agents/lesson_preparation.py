@@ -246,7 +246,8 @@ Return these decisions:
   change given only as a time range.
 - pronunciations: for edit_video when the learner says the narrator says a word wrongly: the
   word as written mapped to a spelling the speech engine will say correctly ('Euler': 'Oiler').
-  Subtitles keep the original word. Add a change entry for each scene that uses the word.
+  Subtitles keep the original word. Do not add change entries for it: the scenes whose
+  narration says the word are found and rebuilt automatically.
 - LARGE EDIT CHECK: when an edit_video would rebuild 5 or more scenes, or the whole video, and the
   learner has not already confirmed it, choose action answer, keep the edit fields, and in reply
   say how many scenes will be rebuilt with the time and cost estimate from VIDEO STATUS, then ask

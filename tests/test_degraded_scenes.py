@@ -137,3 +137,27 @@ def test_still_scene_is_a_playable_clip_of_the_narration_length(tmp_path):
     if not assembler.still_scene(path, 2.0):
         pytest.skip("ffmpeg unavailable")
     assert abs(assembler.probe_duration(str(path)) - 2.0) < 0.2
+
+
+def test_the_reviewer_is_told_where_text_was_measured_on_a_drawing(tmp_path):
+    from scholarmotion.services.orchestration import measured_overlaps
+
+    def box(name, left, right, bottom, top, label=None):
+        return {
+            "name": name,
+            "left": left,
+            "right": right,
+            "bottom": bottom,
+            "top": top,
+            "label": label,
+        }
+
+    figure = [box("Ellipse_2", 1.5, 3.5, 0.1, 0.7), box("Line_3", 1.8, 1.8, -0.1, 0.6)]
+    clear = [*figure, box("Text_4", -4.0, -2.0, 1.0, 1.4, "sunset:red")]
+    covering = [*figure, box("Text_4", 1.6, 3.6, -0.3, 0.3, "sunset:red")]
+    bounds = tmp_path / "bounds.json"
+    bounds.write_text(__import__("json").dumps([clear, covering]))
+    note = measured_overlaps("S07", str(bounds))
+    assert "text 'sunset:red' overlaps ellipse at step 2 of 2 (the final frame)" in note
+    bounds.write_text(__import__("json").dumps([clear]))
+    assert measured_overlaps("S07", str(bounds)) == ""
