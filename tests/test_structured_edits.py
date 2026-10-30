@@ -521,3 +521,57 @@ def test_a_word_the_lesson_never_says_is_not_respelled_or_guessed_into_a_scene()
     )
     checked, saying, missing = checked_pronunciations(only, narrations)
     assert not checked.edits and not checked.pronunciations and missing == ["Rayleigh"]
+
+    # A respelling carried over from an earlier message, already in place, is not redone.
+    again = EditPlan(
+        edits=[SceneEdit(op="change", scene="S03", instruction="slower")],
+        pronunciations={"Euler": "Oiler"},
+    )
+    checked, saying, missing = checked_pronunciations(
+        again, narrations, {"S01": {"Euler": "Oiler"}}
+    )
+    assert not checked.pronunciations and not missing and saying == []
+    assert [edit.scene for edit in checked.edits] == ["S03"]
+
+
+@pytest.mark.asyncio
+async def test_a_visuals_only_change_keeps_every_word_and_the_neighbours(
+    database, tmp_path, monkeypatch
+):
+    project = await _video(database)
+    runtime = _Runtime(tmp_path)
+    monkeypatch.setattr(service_api, "create_pipeline", lambda *a, **k: runtime)
+
+    async def narration_profile(*_args):
+        return {}
+
+    async def must_not_run(*_args, **_kwargs):
+        raise AssertionError("a visuals-only change must not reword the scene or its neighbours")
+
+    monkeypatch.setattr(service_api, "_narration_profile", narration_profile)
+    monkeypatch.setattr(service_api, "classify_feedback", must_not_run)
+    monkeypatch.setattr(service_api, "revise_narration", must_not_run)
+    monkeypatch.setattr(service_api, "review_transitions", must_not_run)
+    async with database.sessions() as session:
+        before = await session.scalar(
+            select(SceneSpecification)
+            .join(Scene, Scene.id == SceneSpecification.scene_id)
+            .where(Scene.scene_key == "S02", SceneSpecification.active.is_(True))
+        )
+        words = before.payload["narration"]
+    plan = EditPlan(
+        edits=[
+            SceneEdit(
+                op="change",
+                scene="S02",
+                instruction="show the molecules scattering blue light",
+                visuals_only=True,
+            )
+        ]
+    )
+    assert await service_api.edit_range(database, Settings(), project.id, 0, 0, plan.encode()) == [
+        "S02"
+    ]
+    spec, extras = runtime.produced[0]
+    assert spec.narration == words
+    assert extras["edit_request"] == "show the molecules scattering blue light"

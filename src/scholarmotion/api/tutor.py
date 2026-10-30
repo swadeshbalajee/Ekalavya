@@ -594,18 +594,23 @@ def _edit_reply(
     return text
 
 
-async def _scene_narrations(session, project_id) -> dict[str, str]:
-    """Each scene's current narration, by scene key."""
-    rows = await session.execute(
-        select(Scene.scene_key, SceneSpecification.payload)
-        .join(SceneSpecification, SceneSpecification.scene_id == Scene.id)
-        .where(Scene.project_id == project_id, SceneSpecification.active.is_(True))
+async def _scene_words(session, project_id) -> tuple[dict[str, str], dict[str, dict]]:
+    """Each scene's current narration, and the respellings it already uses, by scene key."""
+    rows = (
+        await session.execute(
+            select(Scene.scene_key, SceneSpecification.payload)
+            .join(SceneSpecification, SceneSpecification.scene_id == Scene.id)
+            .where(Scene.project_id == project_id, SceneSpecification.active.is_(True))
+        )
+    ).all()
+    return (
+        {key: (payload or {}).get("narration", "") for key, payload in rows},
+        {key: (payload or {}).get("pronunciations") or {} for key, payload in rows},
     )
-    return {key: (payload or {}).get("narration", "") for key, payload in rows}
 
 
 def checked_pronunciations(
-    plan: EditPlan, narrations: dict[str, str]
+    plan: EditPlan, narrations: dict[str, str], applied: dict[str, dict] | None = None
 ) -> tuple[EditPlan, list[str], list[str]]:
     """The plan with only words the narration really says, the scenes saying them, and the rest.
 
@@ -615,10 +620,17 @@ def checked_pronunciations(
     which may reword the scene or add the word to satisfy the request.
     """
     words = dict(plan.pronunciations)
+    applied = applied or {}
+
+    def says(word: str) -> list[str]:
+        return [key for key, text in narrations.items() if uses_any(text, [word])]
+
+    # A respelling every scene saying the word already has is not asked again;
+    # the planner can carry one over from an earlier message in the chat.
     used = {
         word: spoken
         for word, spoken in words.items()
-        if any(uses_any(text, [word]) for text in narrations.values())
+        if says(word) and any(applied.get(key, {}).get(word) != spoken for key in says(word))
     }
     saying = [key for key, text in narrations.items() if uses_any(text, used)]
     edits = [
@@ -626,7 +638,7 @@ def checked_pronunciations(
         for edit in plan.edits
         if not (edit.op == "change" and uses_any(edit.instruction, words))
     ]
-    missing = [word for word in words if word not in used]
+    missing = [word for word in words if not says(word)]
     return plan.model_copy(update={"edits": edits, "pronunciations": used}), saying, missing
 
 
@@ -636,7 +648,7 @@ async def _edit(session, translator, project, preparation, scenes, canonical) ->
     missing: list[str] = []
     if plan.pronunciations:
         plan, saying, missing = checked_pronunciations(
-            plan, await _scene_narrations(session, project.id)
+            plan, *await _scene_words(session, project.id)
         )
         if missing and not plan.edits and not plan.pronunciations:
             quoted = " or ".join(f"'{word}'" for word in missing)

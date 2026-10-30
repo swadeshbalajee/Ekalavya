@@ -1364,6 +1364,7 @@ class _EditSlot:
     revise: bool = False  # rewrite the narration to answer ``request``
     spec_changed: bool = False
     new_text: bool = False  # narration replaced (added, split or merged): plan visuals again
+    visuals_only: bool = False  # the learner asked for a new picture with the same words
 
 
 def _split_narration(spec: SceneSpec) -> tuple[tuple[str, list], tuple[str, list]]:
@@ -1528,6 +1529,8 @@ def _arrange(slots: list[_EditSlot], plan: EditPlan, next_key) -> list[_EditSlot
             slot.rebuild = slot.narration_changed = slot.spec_changed = slot.new_text = True
             slot.request = edit.instruction
         elif edit.op == "change":
+            # Any instruction for the scene that may change its words outweighs "visuals only".
+            slot.visuals_only = edit.visuals_only and (slot.visuals_only or not slot.request)
             slot.rebuild = True
             slot.request = "; ".join(filter(None, [slot.request, edit.instruction]))
     return slots
@@ -1654,7 +1657,9 @@ async def edit_range(
                     }
                 )
                 continue
-            if not slot.request or slot.new_text:
+            if not slot.request or slot.new_text or slot.visuals_only:
+                # A visuals-only change keeps every word, so the audio and the
+                # neighbouring scenes stay as they are; only the picture is redrawn.
                 continue
             classifications[slot.key] = await classify_feedback(planner, slot.request)
             change = invalidation_for(classifications[slot.key][0].feedback_type, slot.request)
@@ -1693,7 +1698,7 @@ async def edit_range(
             now_after = slots[index - 1].key if index else None
             if slot.new_text or slot.row is None or was_after != now_after:
                 boundaries.update({index, index + 1})
-        if not localization_only:
+        if not localization_only and boundaries:
             fixes = await review_transitions(
                 planner, [(slot.key, slot.spec.narration) for slot in slots], sorted(boundaries)
             )

@@ -40,6 +40,8 @@ class SceneEdit(BaseModel):
     after: str = ""
     # What to change, or what a new scene teaches; each scene can have its own.
     instruction: str = ""
+    # For change: true when only the picture changes and every spoken word stays.
+    visuals_only: bool = False
 
 
 class LessonPreparation(BaseModel):
@@ -236,6 +238,9 @@ Return these decisions:
   * change: rebuild that scene following its own instruction (its narration, its visuals or
     both). Different scenes can get different instructions, and scenes in between stay as they
     are ('simplify scene 2 and add pauses before the answers in scene 5' is two entries).
+    Set visuals_only true when the request is only about what is shown (the animation, a
+    diagram, colours, layout, a missing picture) or says to keep the narration; the spoken
+    words and audio then stay exactly as they are.
   * insert_after: add a NEW scene after scene ('' = at the very start); instruction says what
     it teaches.
   * delete: remove the scene.
@@ -244,7 +249,8 @@ Return these decisions:
   * move_after: move the scene to just after the scene named in after ('' = to the start).
   Leave edits empty for a change to the whole video (use whole_video and edit_instruction) or a
   change given only as a time range.
-- pronunciations: for edit_video when the learner says the narrator says a word wrongly: the
+- pronunciations: for edit_video when the learner's LATEST message says the narrator says a
+  word wrongly (never carry one over from earlier messages, it was already applied): the
   word as written mapped to a spelling the speech engine will say correctly ('Euler': 'Oiler').
   Subtitles keep the original word. Do not add change entries for it: the scenes whose
   narration says the word are found and rebuilt automatically.
