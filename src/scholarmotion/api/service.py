@@ -461,16 +461,77 @@ async def openrouter_prices(settings: Settings) -> dict[str, dict[str, float]]:
     return _PRICE_CACHE
 
 
-async def _record_usage_summary(
-    database: Database, settings: Settings, project_id: UUID, ledger: UsageLedger, operation: str
+# Long operations save their calls as they go, so the usage page shows a running
+# edit, and a worker killed mid-run loses at most this many seconds of calls.
+_USAGE_SAVE_SECONDS = 15.0
+
+
+async def _save_usage_rows(
+    database: Database,
+    settings: Settings,
+    project_id: UUID,
+    ledger: UsageLedger,
+    operation: str,
+    run_id: str,
 ) -> None:
-    """Persist what this operation's model calls cost, for the UI and audits."""
+    """Write the calls recorded since the last save as usage rows."""
+    pending = ledger.unsaved()
+    if not pending:
+        return
+    try:
+        if any(entry.cost_usd is None for entry in pending):
+            ledger.estimate_missing_costs(await openrouter_prices(settings))
+        async with database.sessions() as session:
+            owner_id = await session.scalar(
+                select(Project.owner_id).where(Project.id == project_id)
+            )
+            session.add_all(
+                usage_rows(
+                    ledger,
+                    user_id=owner_id,
+                    project_id=project_id,
+                    operation=operation,
+                    run_id=run_id,
+                    entries=pending,
+                )
+            )
+            await session.commit()
+        ledger.mark_saved(len(pending))
+    except Exception as error:  # noqa: BLE001 - accounting must never fail a build
+        logger.warning("Could not save usage rows for %s: %s", project_id, error)
+
+
+async def _save_usage_periodically(
+    stop: asyncio.Event,
+    database: Database,
+    settings: Settings,
+    project_id: UUID,
+    ledger: UsageLedger,
+    operation: str,
+    run_id: str,
+) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), _USAGE_SAVE_SECONDS)
+        except TimeoutError:
+            await _save_usage_rows(database, settings, project_id, ledger, operation, run_id)
+
+
+async def _record_usage_summary(
+    database: Database,
+    settings: Settings,
+    project_id: UUID,
+    ledger: UsageLedger,
+    operation: str,
+    run_id: str,
+) -> None:
+    """Save the last calls and what the whole operation cost, for the UI and audits."""
     if not ledger.entries:
         return
+    await _save_usage_rows(database, settings, project_id, ledger, operation, run_id)
     try:
         if any(entry.cost_usd is None for entry in ledger.entries):
             ledger.estimate_missing_costs(await openrouter_prices(settings))
-        run_id = new_run_id()
         summary = {"operation": operation, "run_id": run_id, **ledger.summary()}
         storage = LocalObjectStore(settings.object_storage_root)
         version = 1
@@ -483,18 +544,6 @@ async def _record_usage_summary(
         )
         async with database.sessions() as session:
             await record_event(session, project_id, "usage.summary", detail=summary)
-            owner_id = await session.scalar(
-                select(Project.owner_id).where(Project.id == project_id)
-            )
-            session.add_all(
-                usage_rows(
-                    ledger,
-                    user_id=owner_id,
-                    project_id=project_id,
-                    operation=operation,
-                    run_id=run_id,
-                )
-            )
             await session.commit()
         logger.info(
             "%s for %s cost $%.4f over %d model calls",
@@ -518,11 +567,22 @@ def _metered(operation: str):
             if current_ledger() is not None:
                 # Nested operation (localize -> edit): the outer one reports.
                 return await function(database, settings, project_id, *args, **kwargs)
+            run_id = new_run_id()
             with track_usage() as ledger:
+                stop = asyncio.Event()
+                saver = asyncio.create_task(
+                    _save_usage_periodically(
+                        stop, database, settings, project_id, ledger, operation, run_id
+                    )
+                )
                 try:
                     return await function(database, settings, project_id, *args, **kwargs)
                 finally:
-                    await _record_usage_summary(database, settings, project_id, ledger, operation)
+                    stop.set()
+                    await saver
+                    await _record_usage_summary(
+                        database, settings, project_id, ledger, operation, run_id
+                    )
 
         return wrapper
 

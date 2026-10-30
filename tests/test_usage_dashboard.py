@@ -75,6 +75,23 @@ def test_ledger_entries_become_rows_with_scene_timing_and_outcome():
     assert rows[0].characters == 900 and rows[0].latency_ms == 1200
 
 
+def test_a_running_operation_saves_only_calls_not_yet_saved():
+    with track_usage() as ledger:
+        record_service_usage(purpose="tts", model="m", cost_usd=0.01)
+        first = ledger.unsaved()
+        ledger.mark_saved(len(first))
+        record_service_usage(purpose="translation", model="m", cost_usd=0.02)
+        record_service_usage(purpose="tts", model="m", cost_usd=0.03)
+        second = ledger.unsaved()
+    assert [entry.cost_usd for entry in first] == [0.01]
+    assert [entry.cost_usd for entry in second] == [0.02, 0.03]
+    rows = usage_rows(
+        ledger, user_id=None, project_id=None, operation="edit", run_id="r1", entries=second
+    )
+    assert [row.purpose for row in rows] == ["translation", "tts"]
+    assert {row.run_id for row in rows} == {"r1"}
+
+
 def test_a_running_build_shows_done_running_and_queued_stages():
     run = [
         _event("project.started", 0),

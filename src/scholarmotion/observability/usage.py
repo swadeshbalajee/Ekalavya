@@ -40,10 +40,21 @@ class UsageEntry:
 class UsageLedger:
     entries: list[UsageEntry] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    # How many leading entries are already saved; entries are only ever appended.
+    _saved: int = field(default=0, repr=False)
 
     def add(self, entry: UsageEntry) -> None:
         with self._lock:
             self.entries.append(entry)
+
+    def unsaved(self) -> list[UsageEntry]:
+        """Entries recorded since the last :meth:`mark_saved`, oldest first."""
+        with self._lock:
+            return self.entries[self._saved :]
+
+    def mark_saved(self, count: int) -> None:
+        with self._lock:
+            self._saved += count
 
     def estimate_missing_costs(self, prices: dict[str, dict[str, float]]) -> None:
         """Price calls whose response carried no cost, from per-token prices.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from scholarmotion.observability.usage import UsageLedger
+from scholarmotion.observability.usage import UsageEntry, UsageLedger
 from scholarmotion.persistence.models import UsageEvent
 
 # (substring of the purpose or stage, dashboard module), first match wins.
@@ -54,10 +54,11 @@ def usage_rows(
     project_id: UUID | None,
     operation: str,
     run_id: str,
+    entries: list[UsageEntry] | None = None,
 ) -> list[UsageEvent]:
-    """One row per ledger entry: tokens, cost, time taken and outcome of each call."""
+    """One row per ledger entry (or per given entry): tokens, cost, time and outcome."""
     rows = []
-    for entry in list(ledger.entries):
+    for entry in list(ledger.entries) if entries is None else entries:
         stage = entry.purpose.rpartition(":")[0]
         rows.append(
             UsageEvent(
