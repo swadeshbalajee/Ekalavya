@@ -22,11 +22,11 @@ qdrant-storage/
 *.log
 
 # --- Generated media, chats' artifacts and supplied sources ---
-projects/
-data/
-evaluation/
-media/
-snapshots/
+/projects/
+/data/
+/evaluation/
+/media/
+/snapshots/
 
 # --- Editors / OS ---
 .vscode/
