@@ -2,7 +2,7 @@ import { useState } from "react";
 import { errorText } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LANGUAGES } from "../lib/format";
-import { useToast } from "../lib/ui";
+import { PALETTES, useTheme, useToast } from "../lib/ui";
 import { Button, Field, Modal, Tabs } from "./common";
 import { ResearchSettings } from "./ResearchSettings";
 
@@ -11,7 +11,8 @@ const COLORS = ["#7C5CFF", "#22D3EE", "#F6B26B", "#22C55E", "#EC4899", "#EF4444"
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, update, logout } = useAuth();
   const toast = useToast();
-  const [tab, setTab] = useState<"account" | "video" | "research">("account");
+  const { theme, setTheme, palette, setPalette } = useTheme();
+  const [tab, setTab] = useState<"account" | "appearance" | "video" | "research">("account");
   const [busy, setBusy] = useState(false);
   const [research, setResearch] = useState<Record<string, number>>(
     () => user?.research_settings ?? {},
@@ -64,12 +65,56 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         onChange={setTab}
         items={[
           { value: "account", label: "Account" },
+          { value: "appearance", label: "Appearance" },
           { value: "video", label: "Video defaults" },
           { value: "research", label: "Research depth" },
         ]}
         className="mb-5"
       />
-      {tab === "research" ? (
+      {tab === "appearance" ? (
+        <div className="space-y-5">
+          <p className="text-sm text-ink-2">Applies right away on this device.</p>
+          <div>
+            <span className="label">Colour theme</span>
+            <div className="grid grid-cols-2 gap-3">
+              {PALETTES.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setPalette(option.value)}
+                  aria-pressed={palette === option.value}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left text-sm transition ${
+                    palette === option.value
+                      ? "border-primary bg-primary/10 text-ink"
+                      : "border-line text-ink-2 hover:bg-raised"
+                  }`}
+                >
+                  <span className="flex overflow-hidden rounded-lg border border-line">
+                    {option.swatch.map((color) => (
+                      <span key={color} className="h-7 w-5" style={{ background: color }} />
+                    ))}
+                  </span>
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <span className="label">Mode</span>
+            <div className="flex gap-2">
+              {(["dark", "light"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setTheme(mode)}
+                  aria-pressed={theme === mode}
+                  className={`chip capitalize ${theme === mode ? "chip-active" : ""}`}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : tab === "research" ? (
         <ResearchSettings values={research} onChange={setResearch} />
       ) : tab === "account" ? (
         <div className="space-y-4">

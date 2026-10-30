@@ -88,12 +88,12 @@ function HeroVisual() {
             </ul>
           </div>
         </div>
-        <div className="relative mt-4 aspect-video overflow-hidden rounded-2xl border border-line bg-[#0b0d16]">
+        <div className="relative mt-4 aspect-video overflow-hidden rounded-2xl border border-line bg-sunken">
           <svg viewBox="0 0 400 225" className="absolute inset-0 h-full w-full">
             <defs>
               <linearGradient id="wave" x1="0" x2="1">
-                <stop offset="0" stopColor="#7C5CFF" />
-                <stop offset="1" stopColor="#22D3EE" />
+                <stop offset="0" style={{ stopColor: "rgb(var(--c-primary))" }} />
+                <stop offset="1" style={{ stopColor: "rgb(var(--c-teal))" }} />
               </linearGradient>
             </defs>
             <path

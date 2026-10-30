@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="description" content="Ekalavya turns a topic, paper or question into a narrated, animated explainer video in your language." />
-    <meta name="theme-color" content="#0A0B10" />
+    <meta name="theme-color" content="#070708" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Ekalavya</title>
     <script>
@@ -12,6 +12,7 @@
         const saved = localStorage.getItem("ekalavya-theme");
         const theme = saved || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
         document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.palette = localStorage.getItem("ekalavya-palette") || "crimson";
       } catch (_) {}
     </script>
   </head>

@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 
 /* ------------------------------------------------------------------ brand */
 
-/** The ழ mark, in the violet-to-teal brand gradient. */
+/** The ழ mark, in the palette's brand gradient. */
 export function LogoMark({ size = 36, className }: { size?: number; className?: string }) {
   const id = useId().replace(/:/g, "");
   return (
@@ -26,9 +26,9 @@ export function LogoMark({ size = 36, className }: { size?: number; className?: 
     >
       <defs>
         <linearGradient id={`g${id}`} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#A48BFF" />
-          <stop offset="0.55" stopColor="#7C5CFF" />
-          <stop offset="1" stopColor="#22D3EE" />
+          <stop offset="0" style={{ stopColor: "var(--brand-1)" }} />
+          <stop offset="0.55" style={{ stopColor: "var(--brand-2)" }} />
+          <stop offset="1" style={{ stopColor: "var(--brand-3)" }} />
         </linearGradient>
       </defs>
       <rect width="128" height="128" rx="32" fill="rgb(var(--c-raised))" />
@@ -89,7 +89,7 @@ export function Avatar({
         width: size,
         height: size,
         fontSize: size * 0.42,
-        background: color || "linear-gradient(135deg, #7C5CFF, #22D3EE)",
+        background: color || "linear-gradient(135deg, var(--brand-2), var(--brand-3))",
       }}
       aria-hidden
     >
@@ -236,8 +236,8 @@ export function ProgressRing({
       <svg width={size} height={size} className="-rotate-90">
         <defs>
           <linearGradient id={`r${id}`} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="rgb(var(--c-primary))" />
-            <stop offset="1" stopColor="rgb(var(--c-teal))" />
+            <stop offset="0" style={{ stopColor: "rgb(var(--c-primary))" }} />
+            <stop offset="1" style={{ stopColor: "rgb(var(--c-teal))" }} />
           </linearGradient>
         </defs>
         <circle

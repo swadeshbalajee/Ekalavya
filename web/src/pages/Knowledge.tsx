@@ -67,7 +67,7 @@ function useSize(ref: React.RefObject<HTMLDivElement>) {
 export default function KnowledgePage() {
   const client = useQueryClient();
   const toast = useToast();
-  const { theme } = useTheme();
+  const { theme, palette: accent } = useTheme();
   const graphRef = useRef<ForceGraphMethods<GraphNode, GraphEdge>>();
   const box = useRef<HTMLDivElement>(null);
   const size = useSize(box);
@@ -126,7 +126,11 @@ export default function KnowledgePage() {
   });
 
   const data = graph.data;
-  const palette = theme === "dark" ? DARK : LIGHT;
+  // The first topic colour follows the accent palette.
+  const palette = [
+    accent === "crimson" ? (theme === "dark" ? "#F04444" : "#CE1620") : (theme === "dark" ? DARK : LIGHT)[0],
+    ...(theme === "dark" ? DARK : LIGHT).slice(1),
+  ];
   const kinds = useMemo(() => {
     const counts = new Map<string, number>();
     for (const node of data?.nodes ?? []) counts.set(node.kind, (counts.get(node.kind) ?? 0) + 1);

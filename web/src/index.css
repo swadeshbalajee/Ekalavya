@@ -6,30 +6,77 @@
 :root,
 [data-theme="dark"] {
   color-scheme: dark;
-  --c-bg: 10 11 16; /* Obsidian */
-  --c-surface: 21 23 34; /* Graphite */
-  --c-raised: 31 36 51; /* Slate */
+  --c-bg: 7 7 8; /* Black */
+  --c-surface: 18 18 20; /* Carbon */
+  --c-raised: 29 29 32; /* Graphite */
+  --c-sunken: 12 12 13;
+  --c-line: 44 44 48;
+  --c-ink: 250 250 250;
+  --c-ink-2: 170 170 176;
+  --c-muted: 118 118 126;
+  --c-primary: 229 37 46; /* Signal red */
+  --c-primary-ink: 255 255 255;
+  --c-teal: 255 110 92; /* Ember: secondary accent and gradient end */
+  --c-amber: 246 178 107;
+  --c-success: 34 197 94;
+  --c-warning: 245 158 11;
+  --c-danger: 255 99 99;
+  --c-plum: 74 18 22; /* Deep oxblood */
+  --brand-1: #FF7A6B;
+  --brand-2: #E5252E;
+  --brand-3: #8E0F16;
+  --hero-glow: radial-gradient(60% 50% at 70% 10%, rgb(229 37 46 / 0.24), transparent 70%),
+    radial-gradient(40% 40% at 10% 90%, rgb(255 110 92 / 0.08), transparent 70%);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --c-bg: 250 250 250;
+  --c-surface: 255 255 255;
+  --c-raised: 243 243 244;
+  --c-sunken: 238 238 240;
+  --c-line: 228 228 231;
+  --c-ink: 12 12 14;
+  --c-ink-2: 72 72 80;
+  --c-muted: 122 122 132;
+  --c-primary: 206 22 32;
+  --c-primary-ink: 255 255 255;
+  --c-teal: 214 64 46;
+  --c-amber: 217 119 6;
+  --c-success: 22 163 74;
+  --c-warning: 217 119 6;
+  --c-danger: 185 28 28;
+  --c-plum: 254 226 226;
+  --brand-1: #FF6B5B;
+  --brand-2: #CE1620;
+  --brand-3: #8E0F16;
+  --hero-glow: radial-gradient(60% 50% at 70% 10%, rgb(229 37 46 / 0.12), transparent 70%),
+    radial-gradient(40% 40% at 10% 90%, rgb(255 110 92 / 0.08), transparent 70%);
+}
+
+/* Violet palette: the original look, chosen in Settings. */
+[data-palette="violet"]:not([data-theme="light"]) {
+  --c-bg: 10 11 16;
+  --c-surface: 21 23 34;
+  --c-raised: 31 36 51;
   --c-sunken: 15 17 25;
   --c-line: 42 49 66;
   --c-ink: 248 250 252;
   --c-ink-2: 161 168 183;
   --c-muted: 112 120 140;
-  --c-primary: 124 92 255; /* Violet */
-  --c-primary-ink: 255 255 255;
-  --c-teal: 34 211 238; /* Electric teal */
-  --c-amber: 246 178 107;
-  --c-success: 34 197 94;
-  --c-warning: 245 158 11;
+  --c-primary: 124 92 255;
+  --c-teal: 34 211 238;
   --c-danger: 239 68 68;
-  --c-plum: 59 47 107; /* Muted purple */
+  --c-plum: 59 47 107;
+  --brand-1: #A48BFF;
+  --brand-2: #7C5CFF;
+  --brand-3: #22D3EE;
   --hero-glow: radial-gradient(60% 50% at 70% 10%, rgb(124 92 255 / 0.28), transparent 70%),
     radial-gradient(40% 40% at 10% 90%, rgb(34 211 238 / 0.12), transparent 70%);
 }
 
-[data-theme="light"] {
-  color-scheme: light;
+[data-palette="violet"][data-theme="light"] {
   --c-bg: 248 250 252;
-  --c-surface: 255 255 255;
   --c-raised: 241 243 249;
   --c-sunken: 236 239 246;
   --c-line: 226 232 240;
@@ -37,13 +84,12 @@
   --c-ink-2: 71 85 105;
   --c-muted: 120 132 152;
   --c-primary: 99 70 230;
-  --c-primary-ink: 255 255 255;
   --c-teal: 8 145 178;
-  --c-amber: 217 119 6;
-  --c-success: 22 163 74;
-  --c-warning: 217 119 6;
   --c-danger: 220 38 38;
   --c-plum: 237 233 254;
+  --brand-1: #A48BFF;
+  --brand-2: #7C5CFF;
+  --brand-3: #22D3EE;
   --hero-glow: radial-gradient(60% 50% at 70% 10%, rgb(124 92 255 / 0.16), transparent 70%),
     radial-gradient(40% 40% at 10% 90%, rgb(34 211 238 / 0.10), transparent 70%);
 }

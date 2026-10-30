@@ -4,28 +4,57 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 /* ------------------------------------------------------------------ theme */
 
 type Theme = "dark" | "light";
-const ThemeContext = createContext<{ theme: Theme; toggle: () => void }>({
+/** Accent colours, independent of light/dark: crimson (black and red) or the original violet. */
+export type Palette = "crimson" | "violet";
+export const PALETTES: { value: Palette; label: string; swatch: string[] }[] = [
+  { value: "crimson", label: "Crimson", swatch: ["#070708", "#E5252E", "#FF6E5C"] },
+  { value: "violet", label: "Violet", swatch: ["#0A0B10", "#7C5CFF", "#22D3EE"] },
+];
+const ThemeContext = createContext<{
+  theme: Theme;
+  toggle: () => void;
+  setTheme: (theme: Theme) => void;
+  palette: Palette;
+  setPalette: (palette: Palette) => void;
+}>({
   theme: "dark",
   toggle: () => {},
+  setTheme: () => {},
+  palette: "crimson",
+  setPalette: () => {},
 });
+
+function remember(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* not remembered */
+  }
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(
     () => (document.documentElement.dataset.theme as Theme) || "dark",
   );
+  const [palette, setPalette] = useState<Palette>(
+    () => (document.documentElement.dataset.palette as Palette) || "crimson",
+  );
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    root.dataset.palette = palette;
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", theme === "dark" ? "#0A0B10" : "#F8FAFC");
-    try {
-      localStorage.setItem("ekalavya-theme", theme);
-    } catch {
-      /* not remembered */
-    }
-  }, [theme]);
+      ?.setAttribute("content", `rgb(${getComputedStyle(root).getPropertyValue("--c-bg").trim()})`);
+    remember("ekalavya-theme", theme);
+    remember("ekalavya-palette", palette);
+  }, [theme, palette]);
   const toggle = useCallback(() => setTheme((value) => (value === "dark" ? "light" : "dark")), []);
-  return <ThemeContext.Provider value={{ theme, toggle }}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={{ theme, toggle, setTheme, palette, setPalette }}>
+      {children}
+    </ThemeContext.Provider>
+  );
 }
 
 export const useTheme = () => useContext(ThemeContext);
