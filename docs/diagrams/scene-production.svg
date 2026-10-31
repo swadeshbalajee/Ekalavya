@@ -33,7 +33,7 @@
 <rect x="920.0" y="106.0" width="400.0" height="96.0" rx="9" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
 <text x="932.0" y="132.0" font-size="14" font-weight="600" fill="#713f12" >Corrections (prefetched)</text>
 <circle cx="935.0" cy="150.0" r="1.8" fill="#64748b"/>
-<text x="942.0" y="154.0" font-size="12" fill="#334155" >learned rules matching the lesson&#x27;s tags and primitives</text>
+<text x="942.0" y="154.0" font-size="12" fill="#334155" >CORRECTIONS.md index + entries whose triggers match</text>
 <rect x="1360.0" y="106.0" width="400.0" height="96.0" rx="9" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
 <text x="1372.0" y="132.0" font-size="14" font-weight="600" fill="#713f12" >Code skills (prefetched)</text>
 <circle cx="1375.0" cy="150.0" r="1.8" fill="#64748b"/>
@@ -164,7 +164,7 @@
 <rect x="444.0" y="1021.5" width="420.0" height="79.0" rx="9" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="5 4"/>
 <text x="456.0" y="1047.5" font-size="14" font-weight="600" fill="#334155" >Memory and repair</text>
 <circle cx="459.0" cy="1065.0" r="1.8" fill="#64748b"/>
-<text x="466.0" y="1069.0" font-size="11.5" fill="#334155" >RELEVANT CORRECTIONS</text>
+<text x="466.0" y="1069.0" font-size="11.5" fill="#334155" >LESSONS FROM EARLIER FAILURES (correction folder)</text>
 <circle cx="459.0" cy="1080.5" r="1.8" fill="#64748b"/>
 <text x="466.0" y="1084.5" font-size="11.5" fill="#334155" >repair feedback + the failed source (on repairs)</text>
 <rect x="940.0" y="758.0" width="260.0" height="112.0" rx="9" fill="#f3e8ff" stroke="#8b5cf6" stroke-width="1.5"/>
@@ -230,8 +230,8 @@
 <text x="76.0" y="1391.5" font-size="12" fill="#334155" >verification/ (layout, math, pedagogy,</text>
 <text x="76.0" y="1407.5" font-size="12" fill="#334155" >render, semantic, visual, aggregator.py)</text>
 <circle cx="69.0" cy="1419.5" r="1.8" fill="#64748b"/>
-<text x="76.0" y="1423.5" font-size="12" fill="#334155" >Issues flagged as recurring become</text>
-<text x="76.0" y="1439.5" font-size="12" fill="#334155" >correction evidence</text>
+<text x="76.0" y="1423.5" font-size="12" fill="#334155" >Problems a repair fixed become</text>
+<text x="76.0" y="1439.5" font-size="12" fill="#334155" >candidate correction notes</text>
 <rect x="444.0" y="1368.5" width="300.0" height="79.0" rx="9" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
 <rect x="671.6" y="1376.5" width="64.4" height="18" rx="9" fill="#e2e8f0"/><text x="703.8" y="1389.5" font-size="10.5" font-weight="600" fill="#334155" text-anchor="middle">no model</text>
 <text x="456.0" y="1393.5" font-size="13" font-weight="600" fill="#7f1d1d" >render</text>

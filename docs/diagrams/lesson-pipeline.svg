@@ -348,13 +348,13 @@
 <rect x="54.0" y="2034.0" width="312.0" height="81.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
 <text x="66.0" y="2061.0" font-size="15" font-weight="600" fill="#7c3d0c" >7 · Read shared memory once</text>
 <circle cx="69.0" cy="2079.0" r="1.8" fill="#64748b"/>
-<text x="76.0" y="2083.0" font-size="12" fill="#334155" >memory/correction_memory.py,</text>
+<text x="76.0" y="2083.0" font-size="12" fill="#334155" >memory/correction_folder.py,</text>
 <text x="76.0" y="2099.0" font-size="12" fill="#334155" >skills/service.py (see learning-loop.svg)</text>
 <rect x="430.0" y="2034.0" width="300.0" height="80.0" rx="9" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
 <text x="442.0" y="2060.0" font-size="14" font-weight="600" fill="#713f12" >Corrections</text>
 <circle cx="445.0" cy="2078.0" r="1.8" fill="#64748b"/>
-<text x="452.0" y="2082.0" font-size="12" fill="#334155" >top 20 active entries matching every</text>
-<text x="452.0" y="2098.0" font-size="12" fill="#334155" >scene&#x27;s tags and visual primitives</text>
+<text x="452.0" y="2082.0" font-size="12" fill="#334155" >the CORRECTIONS.md index + entries</text>
+<text x="452.0" y="2098.0" font-size="12" fill="#334155" >whose triggers match each scene</text>
 <rect x="754.0" y="2034.0" width="300.0" height="80.0" rx="9" fill="#fefce8" stroke="#ca8a04" stroke-width="1.5"/>
 <text x="766.0" y="2060.0" font-size="14" font-weight="600" fill="#713f12" >Code skills</text>
 <circle cx="769.0" cy="2078.0" r="1.8" fill="#64748b"/>
@@ -454,7 +454,7 @@
 <text x="1112.0" y="2745.0" font-size="12" fill="#334155" >scenes, renders, verification runs and</text>
 <text x="1112.0" y="2761.0" font-size="12" fill="#334155" >issues</text>
 <circle cx="1105.0" cy="2773.0" r="1.8" fill="#64748b"/>
-<text x="1112.0" y="2777.0" font-size="12" fill="#334155" >flagged issues → correction evidence</text>
+<text x="1112.0" y="2777.0" font-size="12" fill="#334155" >repairs that worked → correction notes</text>
 <circle cx="1105.0" cy="2789.0" r="1.8" fill="#64748b"/>
 <text x="1112.0" y="2793.0" font-size="12" fill="#334155" >usage summary by stage and scene</text>
 <rect x="1450.0" y="2697.0" width="260.0" height="112.0" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>

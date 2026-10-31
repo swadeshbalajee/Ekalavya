@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from scholarmotion.observability import record_provider_event
 from scholarmotion.observability.usage import record_failure, record_usage
 
-from .base import LLMCapabilities, call_timeout_seconds
+from .base import LLMCapabilities, call_timeout_seconds, restore_latex_escapes
 from .thinking import Thinking, thinking_for
 
 T = TypeVar("T", bound=BaseModel)
@@ -233,7 +233,7 @@ class OpenAICompatibleProvider:
         )
         if response.output_parsed is None:
             raise ValueError(f"{response.model} did not return the requested structured output")
-        return response.output_parsed
+        return restore_latex_escapes(response.output_parsed)
 
     async def generate_structured_from_pdf(
         self,
@@ -294,7 +294,9 @@ class OpenAICompatibleProvider:
             timeout_seconds=420,
             purpose=purpose,
         )
-        return output_schema.model_validate(_parse_json_object(_response_text(response)))
+        return restore_latex_escapes(
+            output_schema.model_validate(_parse_json_object(_response_text(response)))
+        )
 
     async def generate_text(
         self,

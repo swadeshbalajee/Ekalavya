@@ -94,12 +94,12 @@
 <circle cx="1375.0" cy="186.0" r="1.8" fill="#64748b"/>
 <text x="1382.0" y="190.0" font-size="12" fill="#334155" >sources and chunks, verification runs and issues</text>
 <circle cx="1375.0" cy="202.0" r="1.8" fill="#64748b"/>
-<text x="1382.0" y="206.0" font-size="12" fill="#334155" >corrections, skills, audit, usage events, concept graph,</text>
+<text x="1382.0" y="206.0" font-size="12" fill="#334155" >skills, audit, usage events, concept graph, quizzes,</text>
 <text x="1382.0" y="222.0" font-size="12" fill="#334155" >catalog, study data</text>
 <rect x="1360.0" y="252.0" width="420.0" height="80.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
 <text x="1372.0" y="278.0" font-size="14" font-weight="600" fill="#1e3a8a" >qdrant: rebuildable vectors</text>
 <circle cx="1375.0" cy="296.0" r="1.8" fill="#64748b"/>
-<text x="1382.0" y="300.0" font-size="12" fill="#334155" >source chunks (chat + library), skills, knowledge concepts</text>
+<text x="1382.0" y="300.0" font-size="12" fill="#334155" >source chunks, skills, concepts, learner quiz answers</text>
 <circle cx="1375.0" cy="312.0" r="1.8" fill="#64748b"/>
 <text x="1382.0" y="316.0" font-size="12" fill="#334155" >filtered per chat; rebuilt from Postgres when they drift</text>
 <rect x="1360.0" y="346.0" width="420.0" height="96.0" rx="9" fill="#e8f1fd" stroke="#4a86e8" stroke-width="1.5"/>
@@ -116,7 +116,7 @@
 <rect x="54.0" y="719.5" width="410.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
 <text x="66.0" y="745.5" font-size="14" font-weight="600" fill="#0f172a" >OpenRouter (or any OpenAI-compatible API)</text>
 <circle cx="69.0" cy="763.5" r="1.8" fill="#64748b"/>
-<text x="76.0" y="767.5" font-size="12" fill="#334155" >main LLM, planner, code, vision, video review, translation</text>
+<text x="76.0" y="767.5" font-size="12" fill="#334155" >LLMs: main, planner, code, vision, video, translation, safety</text>
 <circle cx="69.0" cy="779.5" r="1.8" fill="#64748b"/>
 <text x="76.0" y="783.5" font-size="12" fill="#334155" >web search for research</text>
 <rect x="484.0" y="719.5" width="300.0" height="80.0" rx="9" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>

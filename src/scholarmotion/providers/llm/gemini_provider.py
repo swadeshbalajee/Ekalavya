@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from scholarmotion.observability import record_provider_event
 
-from .base import LLMCapabilities, call_timeout_seconds
+from .base import LLMCapabilities, call_timeout_seconds, restore_latex_escapes
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -165,12 +165,12 @@ class GeminiProvider:
         )
         parsed = getattr(result, "parsed", None)
         if isinstance(parsed, output_schema):
-            return parsed
+            return restore_latex_escapes(parsed)
         if isinstance(parsed, dict):
-            return output_schema.model_validate(parsed)
+            return restore_latex_escapes(output_schema.model_validate(parsed))
         raw = (result.text or "").strip()
         raw = raw.removeprefix("```json").removesuffix("```").strip()
-        return output_schema.model_validate_json(raw)
+        return restore_latex_escapes(output_schema.model_validate_json(raw))
 
     async def generate_code(self, prompt: str, *, temperature: float | None = None) -> str:
         raw = await self.generate_text(prompt, temperature=temperature)

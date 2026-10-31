@@ -7,7 +7,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from .base import LLMCapabilities
+from .base import LLMCapabilities, restore_latex_escapes
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -43,8 +43,10 @@ class AnthropicProvider:
         raw = await self.generate_text(
             f"{prompt}\nReturn only JSON matching: {schema}", temperature=temperature
         )
-        return output_schema.model_validate_json(
-            raw.strip().removeprefix("```json").removesuffix("```").strip()
+        return restore_latex_escapes(
+            output_schema.model_validate_json(
+                raw.strip().removeprefix("```json").removesuffix("```").strip()
+            )
         )
 
     async def generate_code(self, prompt: str, *, temperature: float | None = None) -> str:

@@ -18,16 +18,16 @@
 <circle cx="355.0" cy="144.0" r="1.8" fill="#64748b"/>
 <text x="362.0" y="148.0" font-size="12" fill="#334155" >chat summary + last 7 user turns word for word</text>
 <circle cx="355.0" cy="160.0" r="1.8" fill="#64748b"/>
-<text x="362.0" y="164.0" font-size="12" fill="#334155" >attached papers and sources</text>
+<text x="362.0" y="164.0" font-size="12" fill="#334155" >sources; private learner notes (quizzes, plan)</text>
 <circle cx="355.0" cy="176.0" r="1.8" fill="#64748b"/>
 <text x="362.0" y="180.0" font-size="12" fill="#334155" >the chat&#x27;s videos with scene ids and times</text>
 <rect x="780.0" y="100.0" width="330.0" height="96.0" rx="9" fill="#fff4e5" stroke="#f0a04b" stroke-width="1.5"/>
 <rect x="1043.9" y="108.0" width="58.1" height="18" rx="9" fill="#ede9fe"/><text x="1073.0" y="121.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">planner</text>
-<text x="792.0" y="126.0" font-size="14" font-weight="600" fill="#7c3d0c" >prepare_lesson</text>
+<text x="792.0" y="126.0" font-size="14" font-weight="600" fill="#7c3d0c" >prepare_lesson ∥ safety screen</text>
 <circle cx="795.0" cy="144.0" r="1.8" fill="#64748b"/>
 <text x="802.0" y="148.0" font-size="12" fill="#334155" >chooses the action by meaning, not keywords</text>
 <circle cx="795.0" cy="160.0" r="1.8" fill="#64748b"/>
-<text x="802.0" y="164.0" font-size="12" fill="#334155" >languages, length, scope, canonical English</text>
+<text x="802.0" y="164.0" font-size="12" fill="#334155" >languages, length, scope; unsafe asks declined</text>
 <rect x="1150.0" y="96.0" width="630.0" height="64.0" rx="9" fill="#e6f7f2" stroke="#10a37f" stroke-width="1.5"/>
 <rect x="1707.6" y="104.0" width="64.4" height="18" rx="9" fill="#ede9fe"/><text x="1739.8" y="117.0" font-size="10.5" font-weight="600" fill="#5b21b6" text-anchor="middle">main LLM</text>
 <text x="1162.0" y="122.0" font-size="14" font-weight="600" fill="#064e3b" >answer → tutor reply</text>
@@ -152,8 +152,8 @@
 <circle cx="935.0" cy="1129.0" r="1.8" fill="#64748b"/>
 <text x="942.0" y="1133.0" font-size="12" fill="#334155" >a FeedbackEvent per classification</text>
 <circle cx="935.0" cy="1145.0" r="1.8" fill="#64748b"/>
-<text x="942.0" y="1149.0" font-size="12" fill="#334155" >memory-eligible feedback → correction evidence (learning-</text>
-<text x="942.0" y="1165.0" font-size="12" fill="#334155" >loop.svg)</text>
+<text x="942.0" y="1149.0" font-size="12" fill="#334155" >memory-eligible feedback → a candidate note in</text>
+<text x="942.0" y="1165.0" font-size="12" fill="#334155" >correction_folder (learning-loop.svg)</text>
 <path d="M300.0,148.0 L340.0,148.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
 <path d="M740.0,148.0 L780.0,148.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
 <path d="M1110.0,148.0 L1130.0,148.0 L1130.0,128.0 L1150.0,128.0" fill="none" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>

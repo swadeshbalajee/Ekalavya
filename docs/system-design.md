@@ -36,12 +36,14 @@ text there and regenerate the diagrams.
   sandbox (with LaTeX and Noto fonts) and the media tools (FFmpeg, MMS forced alignment).
 - **Data:**
   - **Postgres** is the source of truth.
-  - **Qdrant** holds only rebuildable vectors: source chunks, skills and knowledge concepts.
+  - **Qdrant** holds only rebuildable vectors: source chunks, skills, knowledge concepts and
+    learners' answered quiz questions.
   - **The artifact store** (`./projects`) holds every versioned file. Rendered videos are
     streamed back through the API.
 - **Providers** are set per capability in `.env`, each with its own model and a fallback. The
   capabilities are:
-  - main LLM, planner, code, vision, video review, translation, TTS, STT, embeddings.
+  - main LLM, planner, code, vision, video review, translation, TTS, STT, embeddings, and the
+    safety screen.
 
   Kokoro is an optional local English TTS service (compose profile `kokoro`), used for $0 QA
   runs with `docker-compose.qa-free.yml`.
@@ -92,8 +94,8 @@ text there and regenerate the diagrams.
    in order. Each blocking scene gets its narration rewritten and is rebuilt in parallel, once;
    if the rebuild fails, the original scene is kept.
 10. **Assemble.** FFmpeg joins the scenes, holds the closing frame and fades out. Captions come
-    from the measured cues. Everything is saved, and recurring issues become correction
-    evidence.
+    from the measured cues. Everything is saved, and repairs that worked become correction
+    notes.
 
 Throughout the build:
 - every step records a progress event;
@@ -160,17 +162,23 @@ Each scene then takes its slice: its beats, and its cut of the audio with measur
 
 ![Learning loop](diagrams/learning-loop.svg)
 
-**Corrections** are learned rules, stored as Postgres records, not files.
-- **Evidence** comes from two places:
-  - verifier issues flagged as recurring;
-  - learner edits that the feedback classifier marks as memory-eligible.
-- **Candidates.** Evidence first becomes a candidate, starting at confidence 0.75 and rising by
-  0.08 with each repeat.
-- **Promotion.** A candidate becomes an active `CORR-LEARNED-…` entry automatically at 2 pieces
-  of evidence and confidence 0.8. An admin can also approve it as `CORR-APPROVED-…`, or disable
-  any entry. Every admin change is audited.
-- **Use.** For each lesson, the 20 best-matching corrections (by tags and visual primitives) go
-  into the code prompt under *RELEVANT CORRECTIONS*.
+**Corrections** are lessons from past failures, kept as a folder of Markdown notes per agent
+(`correction_folder/` with `code/`, `script/`, `storyboard/` and `review/`;
+`memory/correction_folder.py`). People can read, edit, add or delete any file.
+- **Cases** come from two places:
+  - repairs that worked: a scene failed a check and a later attempt passed, so the problem and
+    the fix are recorded (`_learn_from_repairs` in `services/orchestration.py`);
+  - learner edits that the feedback classifier marks as memory-eligible (`edit_range` in
+    `api/service.py`).
+- **Candidates.** Each case is added to a note in `candidates/`, one per kind of problem.
+- **Promotion.** A candidate fixed in 3 different scenes (`PROMOTE_AFTER`) becomes an entry in
+  `entries/` (`C0nn-….md`), and the `CORRECTIONS.md` index is rewritten. An entry can have a
+  check in `checks/`, a small Python function that runs on every generated code and reports
+  findings as verification issues.
+- **Use.** The agent always sees the index. The full text of up to 4 entries whose triggers
+  match the scene (its tags, visual primitives or failing checks) is added under *LESSONS FROM
+  EARLIER FAILURES*. The code writer, the script writer and the scene reviewer each read their
+  own folder.
 
 **Skills** follow the SKILL.md format, stored in Postgres as skill → versions → resources.
 - **Seeding.** Eight system skills and twelve tools are added at startup.
@@ -186,6 +194,15 @@ Each scene then takes its slice: its beats, and its cut of the audio with measur
 
 ![Chat and edits](diagrams/chat-and-edits.svg)
 
+- **Safety screen.** Every message is checked by a small model (`GUARDRAIL_MODEL`,
+  `agents/guardrail.py`) while the planner runs, so it adds almost no wait. Politics, hate,
+  dangerous or cheating requests get a gentle decline; the educational side of a topic is
+  allowed. If the screen itself fails, `GUARDRAIL_ALLOW_ON_ERROR` decides (default: allow).
+- **Learner notes.** The planner also gets private notes on the learner
+  (`services/learner_record.py`): each quiz's latest score, stronger and weaker topics, the
+  quiz answers closest to the current topic (from Qdrant), the active study plan and related
+  concepts. They shape lessons, quizzes and study plans, and are never mentioned unless the
+  learner asks about their own results. They are built when needed; nothing is scheduled.
 - **Routing.** The planner chooses the action by meaning, not by keywords:
   - **answer** gives a checked tutor reply;
   - **make video** starts a build;
@@ -204,4 +221,5 @@ Each scene then takes its slice: its beats, and its cut of the audio with measur
   - anything else → profile.
 
   Everything downstream of that point in the artifact graph is rebuilt, for the affected scenes
-  only. The video is then reassembled, and memory-eligible feedback becomes correction evidence.
+  only. The video is then reassembled, and memory-eligible feedback becomes a case in the
+  correction folder.

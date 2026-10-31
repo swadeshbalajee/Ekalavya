@@ -8,6 +8,7 @@ import re
 
 from pydantic import BaseModel, Field
 
+from scholarmotion.providers.llm.base import restore_latex_escapes
 from scholarmotion.schemas import NarrationBlock, VisualBeat
 
 logger = logging.getLogger(__name__)
@@ -126,7 +127,7 @@ async def _plan_batch(
     try:
         raw = await provider.generate_text(prompt, reasoning_effort="high")
         cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
-        lesson_plan = LessonVisualPlan.model_validate(json.loads(cleaned))
+        lesson_plan = restore_latex_escapes(LessonVisualPlan.model_validate(json.loads(cleaned)))
         return {plan.block_id: plan for plan in lesson_plan.scenes}
     except Exception as error:  # noqa: BLE001 - provider errors should not erase a lesson
         logger.warning("Lesson visual plan was unreadable, asking once more: %s", error)
