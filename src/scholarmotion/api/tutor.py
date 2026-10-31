@@ -52,6 +52,9 @@ from scholarmotion.verification.answers import answer_problems
 
 logger = logging.getLogger(__name__)
 
+# The start of the reply sent when a learner's link cannot be read.
+_UNREADABLE = re.compile(r"I couldn't read (\S+?): ")
+
 
 @dataclass(frozen=True)
 class TutorDecision:
@@ -324,6 +327,31 @@ async def _prepare(
     )
 
 
+async def _replaced_links(session, project, prior_messages) -> set[str]:
+    """Links already reported unreadable that the learner has since given another way.
+
+    After "I couldn't read <link>" the learner attaches the page as a PDF; the
+    planner still sees the link in the conversation, so without this the same read
+    fails again and the attached copy is never used.
+    """
+    reported = {}
+    for message in prior_messages:
+        found = message.role == "assistant" and _UNREADABLE.match(message.canonical_text or "")
+        if found:
+            reported[found.group(1)] = message.created_at
+    if not reported:
+        return set()
+    sources = await project_sources(session, project.id)
+    return {
+        link
+        for link, when in reported.items()
+        if any(
+            source.created_at >= when and (source.metadata_json or {}).get("source_url") != link
+            for source in sources
+        )
+    }
+
+
 async def _act(
     session,
     settings,
@@ -343,6 +371,8 @@ async def _act(
     # Links the learner gave are read into the chat's sources before anything
     # uses them. One that cannot be read is reported, never replaced by others.
     read: list[SourceDocument] = []
+    replaced = await _replaced_links(session, project, prior_messages)
+    preparation.source_links = [link for link in preparation.source_links if link not in replaced]
     if preparation.source_links:
         try:
             read = await ingest_links(

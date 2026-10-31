@@ -278,7 +278,9 @@ Return these decisions:
   means; empty when only one paper is attached or it is unclear.
 - source_links: the http(s) links, copied exactly from the conversation, whose content the
   learner wants used for this reply or video ('take this blog and make a video', 'summarize this
-  page', or a link pasted earlier for the lesson being requested now). Empty otherwise.
+  page', or a link pasted earlier for the lesson being requested now). Empty otherwise. Leave
+  out a link the conversation already reported it couldn't read once the learner has given that
+  material another way (an attached PDF in ATTACHED SOURCES); the attached copy is used instead.
 - source_scope: whether a lesson based on given material (source_links or ATTACHED SOURCES) may
   use outside material:
   * none: the request is not based on any given link or attached source.

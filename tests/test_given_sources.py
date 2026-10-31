@@ -197,6 +197,56 @@ async def test_an_unreadable_link_is_reported_not_replaced(monkeypatch, session)
 
 
 @pytest.mark.asyncio
+async def test_a_pdf_attached_after_an_unreadable_link_is_used_instead(monkeypatch, session):
+    project = await _new_chat(session)
+
+    async def unreadable(*_args):
+        raise LinkUnreadable(BLOG, "the page needs a login or subscription")
+
+    monkeypatch.setattr(tutor_api, "ingest_links", unreadable)
+    first = await _respond(
+        monkeypatch,
+        session,
+        project,
+        f"make a video of {BLOG}",
+        action="generate_video",
+        source_links=[BLOG],
+        source_scope="only_given",
+    )
+    assert "couldn't read" in first.canonical_message
+    await session.flush()
+
+    # The learner attaches the page as a PDF; the planner still names the old link.
+    session.add(
+        SourceDocument(
+            project_id=project.id,
+            kind="paper",
+            title="Consciousness in AI models?",
+            uri=f"{project.id}/sources/consciousness.pdf",
+            metadata_json={"ingestion_status": "complete"},
+        )
+    )
+    await session.flush()
+
+    async def must_not_read(*_args):
+        raise AssertionError("the unreadable link was fetched again")
+
+    monkeypatch.setattr(tutor_api, "ingest_links", must_not_read)
+    decision = await _respond(
+        monkeypatch,
+        session,
+        project,
+        "here is the pdf",
+        action="generate_video",
+        source_links=[BLOG],
+        source_scope="only_given",
+        canonical_request="Explain the blog post 'Consciousness in AI models?'.",
+    )
+    assert "couldn't read" not in decision.canonical_message
+    assert decision.action == "generate_video"
+
+
+@pytest.mark.asyncio
 async def test_a_short_given_source_is_used_whole_in_reading_order():
     chunks = [{"id": f"c{i}", "document_id": "d", "text": f"part {i}"} for i in range(5)]
     assert await service_api.given_source_chunks(None, chunks, "query") == chunks
