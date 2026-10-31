@@ -84,6 +84,20 @@ async def test_a_whole_paper_lecture_is_always_a_video_and_needs_a_paper():
     assert without.lesson_scope == "topic"
 
 
+async def test_fixing_one_scene_of_a_paper_lecture_stays_an_edit():
+    # Seen live: "Scene 7 has h3,h2,h1 overlapping" in a paper chat became a new video.
+    edit = {"op": "change", "scene": "S02", "instruction": "Separate the labels."}
+    result = await _plan(
+        Planner(
+            action="edit_video", lesson_scope="whole_paper", target_scenes=["S02"], edits=[edit]
+        ),
+        attached_papers=["A2T"],
+        video_scenes=SCENES,
+    )
+    assert result.action == "edit_video"
+    assert [item.scene for item in result.edits] == ["S02"]
+
+
 async def test_requested_duration_is_kept_within_the_limit():
     result = await _plan(Planner(action="generate_video", duration_minutes=90))
     assert result.duration_minutes == 30

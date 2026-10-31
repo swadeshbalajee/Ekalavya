@@ -47,6 +47,10 @@ def _kind(name: str) -> str:
     return name.rsplit("_", 1)[0]
 
 
+def is_text(obj: ObjectBounds) -> bool:
+    return _kind(obj.name) in _TEXT_OBJECTS
+
+
 def _contains(outer: ObjectBounds, inner: ObjectBounds, *, tolerance: float = 0.03) -> bool:
     return (
         outer.left - tolerance <= inner.left

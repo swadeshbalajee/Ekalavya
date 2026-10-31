@@ -412,6 +412,8 @@ def _validated(
         result.paper = ""
     if not attached_papers:
         result.lesson_scope = "topic"
-    elif result.lesson_scope == "whole_paper":
+    elif result.lesson_scope == "whole_paper" and result.action in {"answer", "generate_video"}:
+        # A request for the paper's lecture makes one; a change to the lecture
+        # already made (edit, language, earlier version) stays that change.
         result.action = "generate_video"
     return result

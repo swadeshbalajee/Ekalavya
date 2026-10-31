@@ -9,6 +9,10 @@ from scholarmotion.memory.style_registry import DEFAULT_STYLE
 from scholarmotion.persistence.models import AgentTool, Skill, StyleProfile
 from scholarmotion.skills.service import SkillService
 
+# Starting skills for a new, empty database only. Agents read skills from the
+# database, and a skill that already exists there is never overwritten from
+# here: change a live skill by publishing and activating a new version of it
+# (the skills API), then copy the text back here so new installs get it too.
 SYSTEM_SKILLS = [
     {
         "name": "web-research",

@@ -156,7 +156,7 @@ from scholarmotion.retrieval.figure_regions import locate_figure_regions
 from scholarmotion.verification.aggregator import aggregate_reports
 from scholarmotion.verification.checklist import checklist_prompt, edit_check, score_checklist
 from scholarmotion.verification.figures import verify_paper_figures_shown
-from scholarmotion.verification.layout import verify_layout
+from scholarmotion.verification.layout import is_text, verify_layout
 from scholarmotion.verification.math import verify_required_equations
 from scholarmotion.verification.pedagogy import verify_pedagogy, verify_rendered_storyboard
 from scholarmotion.verification.render import (
@@ -284,8 +284,23 @@ def _verify_render_layout(scene_id: str, result: RenderResult) -> list[Verificat
     return issues
 
 
+# The prompt asks for this much space between unrelated labels.
+LABEL_GAP = 0.25
+
+
+def _gap(first: ObjectBounds, second: ObjectBounds) -> float:
+    """Space between two boxes; zero or less when they touch or overlap."""
+    return max(
+        first.left - second.right,
+        second.left - first.right,
+        first.bottom - second.top,
+        second.bottom - first.top,
+    )
+
+
 def measured_overlaps(scene_id: str, bounds_path: str | None, limit: int = 6) -> str:
-    """Where rendering measured text overlapping something, as places for the reviewer to look.
+    """Where rendering measured text overlapping something, or labels crowding each
+    other, as places for the reviewer to look.
 
     Geometry cannot tell a label put on its own bar on purpose from a label
     covering a drawing, so it does not decide; but a reviewer watching the
@@ -298,12 +313,15 @@ def measured_overlaps(scene_id: str, bounds_path: str | None, limit: int = 6) ->
     except (OSError, TypeError, json.JSONDecodeError):
         return ""
     found: dict[str, dict] = {}
+    crowded: dict[tuple[str, str], set[int]] = {}
     for step, snapshot in enumerate(snapshots, 1):
         objects = {item["name"]: ObjectBounds(**item) for item in snapshot}
+        overlapping = set()
         for issue in verify_layout(scene_id, list(objects.values())):
             if issue.category != "layout.overlap" or len(issue.objects) != 2:
                 continue
             first, second = (objects.get(name) for name in issue.objects)
+            overlapping.add(frozenset(issue.objects))
             for text, other in ((first, second), (second, first)):
                 if text is None or other is None or not text.label:
                     continue
@@ -313,26 +331,43 @@ def measured_overlaps(scene_id: str, bounds_path: str | None, limit: int = 6) ->
                     f"text '{other.label}'" if other.label else other.name.rsplit("_", 1)[0].lower()
                 )
                 entry["with"].setdefault(kind, set()).add(other.name)
-    if not found:
+        # Labels never need to touch: any two closer than LABEL_GAP are worth a look.
+        labels = [obj for obj in objects.values() if obj.label and is_text(obj)]
+        for index, first in enumerate(labels):
+            for second in labels[index + 1 :]:
+                pair = frozenset((first.name, second.name))
+                if pair in overlapping or _gap(first, second) >= LABEL_GAP - 0.01:
+                    continue
+                key = tuple(sorted((first.label, second.label)))
+                crowded.setdefault(key, set()).add(step)
+    if not found and not crowded:
         return ""
     total = len(snapshots)
+
+    def span(steps: set[int]) -> str:
+        ordered = sorted(steps)
+        where = f"step {ordered[0]}" if len(ordered) == 1 else f"steps {ordered[0]}-{ordered[-1]}"
+        return where + f" of {total}" + (" (the final frame)" if ordered[-1] == total else "")
+
     lines = []
     for label, entry in list(found.items())[:limit]:
-        steps = sorted(entry["steps"])
         others = ", ".join(
             f"{len(names)} {kind}s" if len(names) > 1 else kind
             for kind, names in entry["with"].items()
         )
-        span = f"step {steps[0]}" if len(steps) == 1 else f"steps {steps[0]}-{steps[-1]}"
-        final = " (the final frame)" if steps[-1] == total else ""
-        lines.append(f"- text '{label}' overlaps {others} at {span} of {total}{final}")
+        lines.append(f"- text '{label}' overlaps {others} at {span(entry['steps'])}")
+    for (first, second), steps in list(crowded.items())[:limit]:
+        lines.append(
+            f"- text '{first}' and text '{second}' are closer than {LABEL_GAP} at {span(steps)}"
+        )
     return (
         "MEASURED OVERLAPS (exact positions recorded while rendering; step k is the settled "
         "picture after the k-th animation; label spaces are removed):\n"
         + "\n".join(lines)
         + "\nLook at each of these spots in the video and stills. Fail text_overlap if the text "
-        "is hard to read there or covers part of the drawing; a label placed on its own bar or "
-        "shape on purpose and still easy to read is fine."
+        "is hard to read there, covers part of the drawing, or labels crowd together so it is "
+        "unclear which label belongs to what; a label placed on its own bar or shape on purpose "
+        "and still easy to read is fine."
     )
 
 

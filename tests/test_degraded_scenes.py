@@ -161,3 +161,33 @@ def test_the_reviewer_is_told_where_text_was_measured_on_a_drawing(tmp_path):
     assert "text 'sunset:red' overlaps ellipse at step 2 of 2 (the final frame)" in note
     bounds.write_text(__import__("json").dumps([clear]))
     assert measured_overlaps("S07", str(bounds)) == ""
+
+
+def test_the_reviewer_is_told_where_labels_crowd_each_other(tmp_path):
+    from scholarmotion.services.orchestration import measured_overlaps
+
+    def label(name, left, bottom, right, top, text):
+        return {
+            "name": name,
+            "left": left,
+            "right": right,
+            "bottom": bottom,
+            "top": top,
+            "label": text,
+        }
+
+    # Measured in a real render: three arrow-tip labels piled up, below the
+    # overlap threshold but plainly unreadable.
+    piled = [
+        label("MathTex_5", -2.02, -0.42, -1.63, -0.07, "h_1"),
+        label("MathTex_6", -2.25, -0.07, -1.85, 0.28, "h_2"),
+        label("MathTex_7", -2.52, 0.16, -2.12, 0.52, "h_3"),
+        label("MathTex_8", 1.0, -0.42, 1.4, -0.07, "far"),
+        label("MathTex_9", 1.7, -0.42, 2.1, -0.07, "spaced"),
+    ]
+    bounds = tmp_path / "bounds.json"
+    bounds.write_text(__import__("json").dumps([piled]))
+    note = measured_overlaps("S07", str(bounds))
+    assert "text 'h_1' and text 'h_2' are closer than 0.25 at step 1 of 1" in note
+    assert "text 'h_2' and text 'h_3' are closer than 0.25" in note
+    assert "far" not in note and "spaced" not in note
