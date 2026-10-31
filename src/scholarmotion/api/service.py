@@ -1319,17 +1319,7 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
             await session.rollback()
             project = await session.get(Project, project_id)
             if project is not None:
-                earlier = await session.scalar(
-                    select(func.max(ProjectArtifact.version)).where(
-                        ProjectArtifact.project_id == project_id,
-                        ProjectArtifact.kind == ArtifactKind.VIDEO.value,
-                    )
-                )
-                # A failed later lesson leaves the chat's earlier video current.
-                if earlier and await activate_video_version(session, project, earlier):
-                    project.status = "COMPLETE"
-                else:
-                    project.status = "FAILED"
+                await keep_earlier_video(session, project, otherwise="FAILED")
                 failure_summary, failure_metadata = _verification_failure_chat_summary(exc)
                 session.add(
                     TutorMessage(
@@ -2404,6 +2394,21 @@ async def _retire_scene_artifacts(session, scene_id: UUID) -> None:
             await session.scalars(select(model).where(model.scene_id == scene_id))
         ).all():
             artifact.active, artifact.stale = False, True
+
+
+async def keep_earlier_video(session, project: Project, *, otherwise: str) -> None:
+    """After a build or edit stops without a new video, the chat's last finished
+    video stays current, so the learner can keep watching and editing it."""
+    earlier = await session.scalar(
+        select(func.max(ProjectArtifact.version)).where(
+            ProjectArtifact.project_id == project.id,
+            ProjectArtifact.kind == ArtifactKind.VIDEO.value,
+        )
+    )
+    if earlier and await activate_video_version(session, project, earlier):
+        project.status = "COMPLETE"
+    else:
+        project.status = otherwise
 
 
 async def activate_video_version(session, project: Project, version: int) -> bool:

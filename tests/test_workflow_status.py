@@ -111,3 +111,58 @@ async def test_progress_reconciles_temporal_cancellation(monkeypatch):
         assert project.status == "CANCELLED"
         assert execution.status == "CANCELLED"
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_rebuild_keeps_the_chats_finished_video(monkeypatch):
+    # Seen live: stopping a rebuild left the chat "cancelled", so the planner saw no
+    # video and the next "fix scene 7" could not edit anything.
+    from scholarmotion.api import service
+    from scholarmotion.persistence.models import ProjectArtifact
+
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    restored = []
+
+    async def cancelled(_settings, _workflow_id):
+        return WorkflowExecutionStatus.CANCELED
+
+    async def activate(_session, _project, version):
+        restored.append(version)
+        return True
+
+    monkeypatch.setattr(api_main, "get_workflow_status", cancelled)
+    monkeypatch.setattr(service, "activate_video_version", activate)
+    async with sessions() as session:
+        user = UserAccount(username="kept-video", password_hash="unused", display_name="Kept")
+        session.add(user)
+        await session.flush()
+        project = Project(
+            owner_id=user.id, title="Paper", request="Explain the paper.", status="CANCELLING"
+        )
+        session.add(project)
+        await session.flush()
+        session.add_all(
+            [
+                ProjectArtifact(project_id=project.id, kind="video", version=1),
+                WorkflowExecution(
+                    project_id=project.id,
+                    workflow_id="project:test:rebuild:1",
+                    workflow_type="BuildVideoWorkflow",
+                    status="CANCELLING",
+                ),
+            ]
+        )
+        await session.commit()
+
+        context = api_main.current_user_id.set(user.id)
+        try:
+            result = await api_main.progress(project.id, session)
+        finally:
+            api_main.current_user_id.reset(context)
+
+        assert restored == [1]
+        assert (result["status"], project.status) == ("COMPLETE", "COMPLETE")
+    await engine.dispose()

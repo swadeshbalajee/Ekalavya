@@ -44,6 +44,7 @@ from scholarmotion.api.learning import (
 )
 from scholarmotion.api.service import (
     activate_video_version,
+    keep_earlier_video,
     openrouter_prices,
     reassemble_active,
     reset_failed_generation,
@@ -1115,11 +1116,11 @@ async def progress(project_id: UUID, session: SessionDep):
             temporal_status = None
         status_name = getattr(temporal_status, "name", None)
         if status_name == "CANCELED":
-            project.status = "CANCELLED"
+            await keep_earlier_video(session, project, otherwise="CANCELLED")
             latest_execution.status = "CANCELLED"
             await session.commit()
         elif status_name == "FAILED":
-            project.status = "FAILED"
+            await keep_earlier_video(session, project, otherwise="FAILED")
             latest_execution.status = "FAILED"
             latest_execution.detail = {
                 **(latest_execution.detail or {}),

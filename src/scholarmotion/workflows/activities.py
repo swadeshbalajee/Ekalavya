@@ -9,7 +9,12 @@ from uuid import UUID
 from sqlalchemy import select
 from temporalio import activity
 
-from scholarmotion.api.service import edit_range, localize_project, run_generation
+from scholarmotion.api.service import (
+    edit_range,
+    keep_earlier_video,
+    localize_project,
+    run_generation,
+)
 from scholarmotion.config import get_settings
 from scholarmotion.observability import record_workflow_terminal
 from scholarmotion.persistence.database import Database
@@ -42,7 +47,7 @@ async def _set_workflow_execution_status(
             if status == "CANCELLED":
                 project = await session.get(Project, UUID(project_id))
                 if project is not None:
-                    project.status = "CANCELLED"
+                    await keep_earlier_video(session, project, otherwise="CANCELLED")
             if error:
                 execution.detail = {**(execution.detail or {}), "error": error[:2000]}
             await session.commit()
