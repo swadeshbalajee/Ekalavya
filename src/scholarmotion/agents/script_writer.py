@@ -42,6 +42,9 @@ class ScriptReview(BaseModel):
 
 
 SCRIPT_REVIEW_ROUNDS = 3
+# Revisions a draft gets when it does not fit the plan (missing or empty
+# segments) before the build gives up; long lectures need dozens of segments.
+SCRIPT_SHAPE_ROUNDS = 5
 
 # How a lesson may use material beyond the learner's own source, by the
 # planner's source_scope. Evidence whose source id starts with "web-" came
@@ -452,15 +455,47 @@ async def write_script(
             _attach_unclaimed_plots(blocks, curriculum)
             return blocks
 
+        def shape_problems(draft: LessonScript) -> list[str]:
+            problems = []
+            if len(draft.segments) != len(slots):
+                problems.append(
+                    f"The draft has {len(draft.segments)} segments but the plan needs exactly "
+                    f"{len(slots)}: one per Segment line of the outline, in the same order. "
+                    "Do not merge or drop segments; split the narration so each segment keeps "
+                    "to its own title and word budget."
+                )
+            empty = [str(i) for i, s in enumerate(draft.segments, 1) if not s.narration.strip()]
+            if empty:
+                problems.append(f"Segments {', '.join(empty)} have no narration; write it.")
+            return problems
+
+        async def fit_to_plan(draft: LessonScript) -> LessonScript:
+            """Send a draft that does not fit the plan back to the writer until it does."""
+            for _ in range(SCRIPT_SHAPE_ROUNDS):
+                problems = shape_problems(draft)
+                if not problems:
+                    return draft
+                logger.info("Script draft does not fit the plan: %s", " ".join(problems))
+                draft = await provider.generate_structured(
+                    prompt
+                    + "\nRevise this draft:\n"
+                    + draft.model_dump_json()
+                    + "\nIt does not fit the plan yet:\n"
+                    + "\n".join(problems),
+                    LessonScript,
+                )
+            if problems := shape_problems(draft):
+                raise ValueError(
+                    "Script does not cover all planned segments: " + " ".join(problems)
+                )
+            return draft
+
         try:
             draft = await provider.generate_structured(prompt, LessonScript)
             review = ScriptReview(approved=False)
             polished = False
             for revision in range(SCRIPT_REVIEW_ROUNDS):
-                if len(draft.segments) != len(slots) or any(
-                    not s.narration.strip() for s in draft.segments
-                ):
-                    raise ValueError("Script does not cover all planned segments")
+                draft = await fit_to_plan(draft)
                 review = await provider.generate_structured(
                     "Review this entire STEM lesson against the request and source evidence. "
                     "Judge it as a lesson of the stated length: every segment has a strict word "

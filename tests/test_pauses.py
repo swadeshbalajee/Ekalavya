@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from scholarmotion.agents.script_writer import (
+    SCRIPT_SHAPE_ROUNDS,
     LessonScript,
     ScriptReview,
     ScriptSegment,
@@ -161,6 +162,59 @@ async def test_the_script_review_gets_one_polish_pass_for_minor_notes():
     assert calls == ["LessonScript", "ScriptReview", "LessonScript", "ScriptReview"]
     assert blocks[0].text == "Why does ice float? Because it is less dense."
     assert blocks[0].pauses == [Pause(after_sentence=0, seconds=2)]
+
+
+def _two_chapter_plan() -> CurriculumPlan:
+    return CurriculumPlan(
+        topic="ice",
+        items=[
+            CurriculumItem(title="Ice", objective="Explain floating", duration_seconds=30),
+            CurriculumItem(title="Density", objective="Compare densities", duration_seconds=30),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_draft_that_misses_segments_is_sent_back_with_feedback_until_it_fits():
+    prompts = []
+
+    class Writer:
+        name = "openai_compatible"
+
+        async def generate_structured(self, prompt, schema):
+            prompts.append(prompt)
+            if schema is ScriptReview:
+                return ScriptReview(approved=True)
+            drafts = sum(1 for p in prompts if "Return exactly" in p)
+            # Merged into one segment, then an empty one, then right.
+            if drafts == 1:
+                return LessonScript(segments=[ScriptSegment(narration="Ice floats.")])
+            second = "" if drafts == 2 else "Ice is less dense than water."
+            return LessonScript(
+                segments=[ScriptSegment(narration="Ice floats."), ScriptSegment(narration=second)]
+            )
+
+    blocks = await write_script(Writer(), _two_chapter_plan(), {"evidence": []})
+
+    assert [block.text for block in blocks] == ["Ice floats.", "Ice is less dense than water."]
+    assert "has 1 segments but the plan needs exactly 2" in prompts[1]
+    assert "Segments 2 have no narration" in prompts[2]
+
+
+@pytest.mark.asyncio
+async def test_a_draft_that_never_fits_the_plan_stops_after_its_revisions():
+    class Writer:
+        name = "openai_compatible"
+        drafts = 0
+
+        async def generate_structured(self, prompt, schema):
+            self.drafts += 1
+            return LessonScript(segments=[ScriptSegment(narration="Ice floats.")])
+
+    writer = Writer()
+    with pytest.raises(ValueError, match="does not cover all planned segments"):
+        await write_script(writer, _two_chapter_plan(), {"evidence": []})
+    assert writer.drafts == 1 + SCRIPT_SHAPE_ROUNDS
 
 
 @pytest.mark.asyncio
