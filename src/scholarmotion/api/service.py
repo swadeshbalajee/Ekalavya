@@ -1297,6 +1297,7 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     )
                 except Exception as error:  # noqa: BLE001 - QA proof must not disappear on translation failure
                     logger.warning("Could not localize completion QA chat summary: %s", error)
+            await clear_superseded_failures(session, project_id)
             session.add(
                 TutorMessage(
                     project_id=project_id,
@@ -1349,6 +1350,27 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                 )
                 await session.commit()
             raise
+
+
+async def clear_superseded_failures(session, project_id: UUID) -> None:
+    """Remove the failure notices a newly finished video replaces.
+
+    Those are the ones since the chat's previous finished video; each failure
+    stays recorded in the build's progress events.
+    """
+    last_video = await session.scalar(
+        select(func.max(TutorMessage.created_at)).where(
+            TutorMessage.project_id == project_id,
+            TutorMessage.action == "verification_complete",
+        )
+    )
+    superseded = delete(TutorMessage).where(
+        TutorMessage.project_id == project_id,
+        TutorMessage.action == "verification_failed",
+    )
+    if last_video is not None:
+        superseded = superseded.where(TutorMessage.created_at > last_video)
+    await session.execute(superseded)
 
 
 async def _recheck_edited_figures(
