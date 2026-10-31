@@ -406,7 +406,5 @@ The full API is documented at `/docs`. Every route except `/health`, `/docs` and
 - **Resolution:** videos render at 854×480 to keep builds fast.
 - **Code changes rebuild slowly:** the Docker image copies the source before installing dependencies, so any code change reinstalls them (7–11 minutes).
 - **Sandboxing:** the render sandbox uses resource limits. Full network isolation (`SANDBOX_ISOLATION=required`, bubblewrap) is available only on Linux.
-- **Fonts:** some Devanagari and diacritic glyphs (such as Hindi titles, or "ṣ") can render as boxes in video text. Tamil renders correctly.
-- **Lesson length:** set by the planner, up to 30 minutes. Each scene runs as long as its narration, so a requested length is approximate: a "1-minute" lesson often runs 1½ minutes.
 - **Bodhan:** Bodhan speech takes short inputs, so narration is sent in sentence-sized pieces. Busy periods are waited out, which can slow Indian-language builds.
 - **Web sources:** web-page extraction is readability-style. Pages that need JavaScript to render must be attached as a PDF instead.
