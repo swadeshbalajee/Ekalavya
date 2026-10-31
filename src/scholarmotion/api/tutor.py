@@ -231,7 +231,11 @@ async def respond(
         video_versions=await video_history(session, project),
         input_language_hint=payload.language,
         video_status=_video_status(project.status),
+        chat_language=project.chat_language or "English",
     )
+    if preparation.chat_language:
+        # Asked to be talked to in a language: it stays until asked again.
+        project.chat_language = preparation.chat_language
     canonical = (
         preparation.canonical_message
         if preparation.planned
@@ -263,7 +267,6 @@ async def respond(
                 "sources in its place. You can attach the page as a PDF with the + button, or "
                 "paste its text here, and I'll use that.",
                 action="answer",
-                language=text_language,
             )
     if preparation.action == "generate_video" and preparation.source_scope == "not_said":
         # Whether outside material may be added is the learner's call.
@@ -281,7 +284,6 @@ async def respond(
             f'outside sources from the web to fill gaps? Reply "only {this}" or "add outside '
             "sources\", and I'll start the video.",
             action="answer",
-            language=text_language,
         )
 
     if preparation.action == "restore_video":
@@ -375,7 +377,6 @@ async def respond(
             project,
             canonical=preparation.reply,
             action="answer",
-            language=text_language,
         )
     answer, checks = await _tutor_answer(
         session, settings, project, payload, conversation, canonical, prior_messages
@@ -386,7 +387,6 @@ async def respond(
         project,
         canonical=answer,
         action="answer",
-        language=text_language,
         checks=checks,
     )
 
@@ -820,7 +820,10 @@ async def _tutor_answer(
     )
     prompt = (
         "You are a patient STEM tutor for a student who may phrase questions loosely. Answer "
-        "in canonical English using the context below and clear Markdown. When the learner asks "
+        "in canonical English using the context below and clear Markdown. Always write the "
+        "answer in English, even when the learner asks for another language: a later step "
+        "translates it for them. Never write in another language, never add translations of "
+        "terms, and never mention languages or translation in the answer. When the learner asks "
         "you to explain a concept, explain it fully: the intuition, the precise definition, "
         "each symbol in any equation, one small worked example with numbers, and a common "
         "misconception; end with a one-line takeaway. Keep narrow follow-ups and "
@@ -904,6 +907,13 @@ async def respond_ephemeral(
     )
 
 
+def _mostly_latin(text: str) -> bool:
+    """Whether most letters are Latin script, i.e. the text is (still) English."""
+    letters = [char for char in text if char.isalpha()]
+    latin = sum(1 for char in letters if char.isascii())
+    return not letters or latin >= len(letters) / 2
+
+
 async def _save_assistant(
     session: AsyncSession,
     translator: TranslationService,
@@ -916,10 +926,22 @@ async def _save_assistant(
     language: str | None = None,
     checks: dict | None = None,
 ) -> TutorDecision:
-    language = language or project.text_language
-    display = await translator.translate(
-        canonical, source_language="English", target_language=language
-    )
+    # Replies use the chat's language, not the video's: English until the learner
+    # asks to be talked to in another one.
+    language = language or project.chat_language or "English"
+    translated_by = None
+    if language != "English" and not _mostly_latin(canonical):
+        # Already written in the chat's language; translating it again only re-asks
+        # for names of terms that are no longer English.
+        display = canonical
+    else:
+        # As on screen in a video, STEM terms stay in English with the native name in brackets.
+        terms = await translator.stem_terms(canonical) if language != "English" else []
+        display = await translator.translate(
+            canonical, source_language="English", target_language=language, key_terms=terms
+        )
+        if language != "English":
+            translated_by = getattr(translator, "last_translator", None)
     session.add(
         TutorMessage(
             project_id=project.id,
@@ -928,7 +950,13 @@ async def _save_assistant(
             display_text=display,
             language=language,
             action=action,
-            metadata_json={"start": start, "end": end, **({"checks": checks} if checks else {})},
+            metadata_json={
+                "start": start,
+                "end": end,
+                **({"checks": checks} if checks else {}),
+                # Which translator's text is shown, e.g. "bodhan"; none for English.
+                **({"translated_by": translated_by} if translated_by else {}),
+            },
         )
     )
     return TutorDecision(display, canonical, action, start, end)

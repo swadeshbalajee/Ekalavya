@@ -144,8 +144,11 @@ async def test_tutor_prompt_includes_recent_persisted_turns(monkeypatch):
         async def to_english(self, text, source_language=None):
             return text
 
-        async def translate(self, text, source_language=None, target_language=None):
+        async def translate(self, text, source_language=None, target_language=None, key_terms=()):
             return text
+
+        async def stem_terms(self, _text):
+            return []
 
     class CapturingProvider:
         name = "openai_compatible"

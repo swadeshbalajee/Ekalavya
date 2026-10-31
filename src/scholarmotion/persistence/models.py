@@ -65,8 +65,14 @@ class Project(Base, IdMixin):
     # of that conversation, rather than a separate UI session.
     mode: Mapped[str] = mapped_column(String(20), default="both", index=True)
     language: Mapped[str] = mapped_column(String(80), default="English")
+    # The video's on-screen text and narration languages.
     text_language: Mapped[str] = mapped_column(String(80), default="English")
     voice_language: Mapped[str] = mapped_column(String(80), default="English")
+    # The language chat replies use: English until the learner asks to be talked to
+    # in another language, and it stays until they ask again.
+    chat_language: Mapped[str] = mapped_column(
+        String(80), default="English", server_default="English"
+    )
     status: Mapped[str] = mapped_column(String(40), default="CREATED", index=True)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

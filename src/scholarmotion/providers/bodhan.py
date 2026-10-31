@@ -1,7 +1,10 @@
 """Bodhan AI translation and text-to-speech for Indian languages.
 
-API reference: https://console.bodhan.ai/api-docs/. Translation is
-``POST /translate`` with ``{text, target_language}`` and reports ``truncated``.
+API reference: https://console.bodhan.ai/api-docs/. Translation is the
+chat-completions transport, ``POST /v1/chat/completions`` with model
+``indic-translate``, ``target_language`` and one user turn holding the text;
+per-model virtual keys reach only this route, not ``/translate``. A
+``finish_reason`` of ``length`` means the output was truncated.
 Speech is ``POST /v1/audio/speech`` with model ``indic-speak``, a voice name and
 ``instructions`` carrying the language; it returns 24 kHz mono 16-bit WAV and
 expects short inputs (about 30 seconds of speech), so narration is spoken in
@@ -28,6 +31,7 @@ from scholarmotion.schemas import TTSResult
 
 DEFAULT_BASE_URL = "https://api.bodhan.ai"
 TTS_MODEL = "indic-speak"
+TRANSLATE_MODEL = "indic-translate"
 SAMPLE_RATE = 24_000
 # Our supported languages that Bodhan also covers. The rest (Arabic, French,
 # Japanese, Spanish) stay on the OpenRouter providers.
@@ -59,13 +63,33 @@ class BodhanError(RuntimeError):
     """A Bodhan request failed; callers fall back to the OpenRouter provider."""
 
 
+# Requests in flight per key across the whole process: each model's key has a small
+# parallel limit, and going over it is answered with 429s that stall every caller.
+PARALLEL_PER_KEY = 2
+MAX_RETRY_AFTER_SECONDS = 30.0
+_in_flight: dict[tuple[str, int], asyncio.Semaphore] = {}
+
+
+def _wait_seconds(response: httpx.Response, attempt: int) -> float:
+    """How long to wait before retrying: Bodhan's retry-after when it gives one."""
+    try:
+        return min(float(response.headers["retry-after"]), MAX_RETRY_AFTER_SECONDS)
+    except (KeyError, ValueError):
+        return 1.5 * (attempt + 1)
+
+
 async def _post(client: httpx.AsyncClient, url: str, api_key: str, payload: dict) -> httpx.Response:
     """POST with up to three attempts on rate limits and server errors."""
+    # Keyed by event loop too: a semaphore belongs to the loop it is first used on.
+    key = (api_key, id(asyncio.get_running_loop()))
+    limit = _in_flight.setdefault(key, asyncio.Semaphore(PARALLEL_PER_KEY))
     for attempt in range(3):
+        wait = 1.5 * (attempt + 1)
         try:
-            response = await client.post(
-                url, headers={"Authorization": f"Bearer {api_key}"}, json=payload
-            )
+            async with limit:
+                response = await client.post(
+                    url, headers={"Authorization": f"Bearer {api_key}"}, json=payload
+                )
         except httpx.HTTPError as error:
             if attempt == 2:
                 raise BodhanError(f"request failed: {error}") from error
@@ -81,7 +105,8 @@ async def _post(client: httpx.AsyncClient, url: str, api_key: str, payload: dict
                     f"HTTP {response.status_code} {detail.get('code', '')}: "
                     f"{detail.get('message', response.text[:200])}"
                 )
-        await asyncio.sleep(1.5 * (attempt + 1))
+            wait = _wait_seconds(response, attempt)
+        await asyncio.sleep(wait)
     raise BodhanError("request failed")
 
 
@@ -123,11 +148,16 @@ class BodhanTranslator:
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             response = await _post(
                 client,
-                f"{self.base_url}/translate",
+                f"{self.base_url}/v1/chat/completions",
                 self.api_key,
-                {"text": text, "target_language": code},
+                {
+                    "model": TRANSLATE_MODEL,
+                    "target_language": code,
+                    "messages": [{"role": "user", "content": text}],
+                },
             )
         body = response.json()
+        choice = (body.get("choices") or [{}])[0]
         usage = body.get("usage") or {}
         output_tokens = int(usage.get("completion_tokens") or 0)
         _record_usage(
@@ -139,8 +169,9 @@ class BodhanTranslator:
             latency_ms=(time.perf_counter() - started) * 1000,
         )
         return BodhanTranslation(
-            text=str(body.get("translation", "")).strip(),
-            truncated=bool(body.get("truncated")),
+            text=str((choice.get("message") or {}).get("content") or "").strip(),
+            # The output hit its token budget: it reads fluently but stops early.
+            truncated=choice.get("finish_reason") == "length",
             output_tokens=output_tokens,
         )
 

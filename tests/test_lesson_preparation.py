@@ -101,3 +101,10 @@ async def test_fixing_one_scene_of_a_paper_lecture_stays_an_edit():
 async def test_requested_duration_is_kept_within_the_limit():
     result = await _plan(Planner(action="generate_video", duration_minutes=90))
     assert result.duration_minutes == 30
+
+
+async def test_the_chat_language_changes_only_to_a_supported_one_the_planner_named():
+    asked = await _plan(Planner(action="answer", chat_language="tamil"))
+    assert asked.chat_language == "Tamil"
+    assert (await _plan(Planner(action="answer", chat_language="Klingon"))).chat_language == ""
+    assert (await _plan(Planner(action="answer"))).chat_language == ""

@@ -37,6 +37,10 @@ def test_openrouter_key_is_used_for_all_capabilities_with_openrouter_base_url():
         stt_api_key="stale-stt-key",
         stt_model="openai/whisper-1",
         stt_base_url="https://openrouter.ai/api/v1",
+        # A Bodhan key in the developer's .env routes narration through Bodhan.
+        bodhan_api_key=None,
+        bodhan_tts_api_key=None,
+        bodhan_translate_api_key=None,
     )
 
     providers = [

@@ -315,6 +315,11 @@ function NewChat({ openDrawer, folderId }: { openDrawer: () => void; folderId: s
   );
 }
 
+/** "bodhan" -> "Bodhan"; an LLM model id such as "google/gemini-2.5-flash-lite" as it is. */
+function translatorName(value: string) {
+  return value === "bodhan" ? "Bodhan" : value;
+}
+
 function Thinking() {
   return (
     <div className="flex items-center gap-3 text-sm text-ink-2">
@@ -598,6 +603,9 @@ function Thread({ chatId, openDrawer }: { chatId: string; openDrawer: () => void
                   )}
                   {message.action === "generate_video" && message.metadata?.source_note && (
                     <p className="mt-2 text-xs text-muted">{message.metadata.source_note}</p>
+                  )}
+                  {message.metadata?.translated_by && (
+                    <p className="mt-2 text-xs text-muted">Translated by {translatorName(message.metadata.translated_by)}</p>
                   )}
                   {video && data && (
                     <ChatVideo

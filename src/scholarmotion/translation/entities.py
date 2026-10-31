@@ -31,6 +31,11 @@ _NUMBER = re.compile(
     r"|\s*(?P<unit>" + "|".join(re.escape(unit) for unit in _UNIT_WORDS) + r")(?![\w²³]))?"
 )
 TOKEN = re.compile(r"\[\[ZQ[A-Z]+\]\]")
+# A web address, without trailing sentence punctuation or a Markdown link's ")".
+_URL_TEXT = r"https?://[^\s<>\"'()\[\]]+(?:\([^\s()]*\)[^\s<>\"'()\[\]]*)*(?<![.,;:!?])"
+_URL = re.compile(_URL_TEXT)
+# A whole Markdown link: its title names the cited page, so it is not translated either.
+_LINK = re.compile(r"\[[^\]\n]*\]\(\s*" + _URL_TEXT + r"\s*\)")
 
 
 def _token(index: int) -> str:
@@ -98,7 +103,11 @@ def mask(
         items.append(item)
         return item.token
 
-    masked = text
+    # Links first: a translator must copy them untouched, and their digits are not
+    # numbers to protect one by one (a cited page's %20 became a placeholder). A
+    # Markdown link goes whole, title included: a translated title broke the link.
+    masked = _LINK.sub(lambda match: protect("url", match.group(0)), text)
+    masked = _URL.sub(lambda match: protect("url", match.group(0)), masked)
     for equation in sorted({e for e in equations if e}, key=len, reverse=True):
         if equation in masked:
             masked = masked.replace(equation, protect("equation", equation))
@@ -164,7 +173,7 @@ def restore_voice(translated: str, masked: MaskedText, language: str) -> str:
         item = masked.item(match.group(0))
         if item is None:
             return match.group(0)
-        if item.kind in {"term", "equation"}:
+        if item.kind in {"term", "equation", "url"}:
             return item.text
         try:
             return spoken_quantity(item.number, item.unit, language, kind=item.kind)

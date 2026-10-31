@@ -14,6 +14,7 @@ import difflib
 import logging
 import re
 import unicodedata
+from collections import Counter
 from functools import cache
 
 from scholarmotion.translation.entities import TOKEN, MaskedText
@@ -86,7 +87,10 @@ def translation_problems(
     stray = TOKEN.sub("", translated).count("[[") - TOKEN.sub("", masked.text).count("[[")
     if stray > 0:
         problems.append("square brackets [[ ]] were added around text")
-    added = sorted({ch for ch in TOKEN.sub("", translated) if unicodedata.category(ch) == "Nd"})
+    # Only digits beyond those the English already showed outside placeholders.
+    digits = Counter(ch for ch in TOKEN.sub("", translated) if unicodedata.category(ch) == "Nd")
+    digits.subtract(ch for ch in TOKEN.sub("", masked.text) if unicodedata.category(ch) == "Nd")
+    added = sorted(ch for ch, count in digits.items() if count > 0)
     if added:
         problems.append(
             f"digits {' '.join(added)} were added (every number must stay a placeholder)"

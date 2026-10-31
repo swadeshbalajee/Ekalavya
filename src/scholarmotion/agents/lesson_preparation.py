@@ -57,8 +57,12 @@ class LessonPreparation(BaseModel):
     canonical_message: str = ""
     canonical_request: str = ""
     input_language: str = "English"
+    # The video's on-screen text and narration languages.
     text_language: str = "English"
     voice_language: str = "English"
+    # Set only when the learner asks the chat itself to use a language ("talk to me
+    # in Tamil"); empty keeps the chat's current language.
+    chat_language: str = ""
     retrieval_query: str = ""
     # Links (from the latest turn or earlier in the chat) the learner wants used as sources.
     source_links: list[str] = Field(default_factory=list)
@@ -178,6 +182,7 @@ async def prepare_lesson(
     video_versions: list[dict] | None = None,
     input_language_hint: str | None = None,
     video_status: str = "no video yet",
+    chat_language: str = "English",
 ) -> LessonPreparation:
     """Let the planner model decide what this turn asks for, then validate it."""
     fallback = fallback_preparation(
@@ -287,11 +292,16 @@ Return these decisions:
   walkthrough of a paper, or a new topic. Leave out output-language instructions (those belong in
   text_language/voice_language) and duration instructions; do not invent facts.
 - input_language: the language the learner wrote in.
-- text_language and voice_language: the language(s) the reply or video should use. For
-  edit_video, the language of the video being edited (see VIDEO VERSIONS). Take an
-  explicit request in the latest turn first (for localize_video, the requested language), then
-  a preference stated earlier in the conversation ('same language as before'), then the account
-  defaults. Text and voice can differ.
+- text_language and voice_language: the language(s) of the VIDEO (on-screen text and
+  narration), never of the chat. For edit_video, the language of the video being edited (see
+  VIDEO VERSIONS). Take an explicit request in the latest turn first (for localize_video, the
+  requested language), then a preference stated earlier in the conversation ('same language as
+  before'), then the account defaults. Text and voice can differ.
+- chat_language: the language the chat replies in (see CHAT LANGUAGE). Set it only when the
+  latest turn asks the chat itself to use a language ('talk to me in Tamil', 'reply in
+  English from now on'); otherwise leave it empty and the chat keeps its language. Asking for a
+  video in a language is not such a request, and neither is the language the learner happens
+  to write in. Write the reply field in English; it is translated into the chat language.
 - duration_minutes: for generate_video, in minutes (1 to {MAX_LESSON_MINUTES:g}). The length the
   learner asked for, or one they agreed to earlier in the conversation. Otherwise choose the
   length this request needs to be taught well and unhurried: a quick doubt or one formula 1-3, a
@@ -318,8 +328,9 @@ Supported text and narration languages: {", ".join(SUPPORTED_LANGUAGES)}.
 
 ACCOUNT DEFAULTS (use when the learner gives no preference):
 text={account_text_language!r}; voice={account_voice_language!r}
-CURRENT PROJECT SETTINGS:
+CURRENT PROJECT SETTINGS (the video's languages):
 text={project_text_language!r}; voice={project_voice_language!r}
+CHAT LANGUAGE (what the chat replies in now): {chat_language!r}
 SAVED LEARNER CONTEXT (empty means none has been configured):
 {context}
 RECENT CONVERSATION (oldest first):
@@ -379,6 +390,8 @@ def _validated(
     result.text_language = _language(result.text_language, fallback.text_language)
     result.voice_language = _language(result.voice_language, fallback.voice_language)
     result.input_language = _language(result.input_language, fallback.input_language)
+    # An unsupported or empty choice keeps the chat's current language.
+    result.chat_language = _language(result.chat_language, "")
     result.canonical_message = result.canonical_message.strip() or fallback.canonical_message
     result.canonical_request = result.canonical_request.strip() or fallback.canonical_request
     result.retrieval_query = result.retrieval_query.strip() or fallback.retrieval_query

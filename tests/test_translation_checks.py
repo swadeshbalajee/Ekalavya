@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import wave
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -303,3 +304,101 @@ async def test_bodhan_translation_errors_surface_as_bodhan_error():
     translator = BodhanTranslator(api_key="key", transport=httpx.MockTransport(handler))
     with pytest.raises(RuntimeError, match="unsupported_language"):
         await translator.translate("Hello", "Tamil")
+
+
+@pytest.mark.asyncio
+async def test_bodhan_translation_uses_the_chat_route_its_keys_reach():
+    # Per-model virtual keys get 404 on /translate; only the chat route answers.
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": " அலை "}, "finish_reason": "length"}],
+                "usage": {"completion_tokens": 7},
+            },
+        )
+
+    translator = BodhanTranslator(api_key="key", transport=httpx.MockTransport(handler))
+    result = await translator.translate("A wave.", "Tamil")
+
+    path, body = seen[0]
+    assert path == "/v1/chat/completions"
+    assert body == {
+        "model": "indic-translate",
+        "target_language": "ta",
+        "messages": [{"role": "user", "content": "A wave."}],
+    }
+    assert (result.text, result.truncated, result.output_tokens) == ("அலை", True, 7)
+
+
+@pytest.mark.asyncio
+async def test_bodhan_waits_as_long_as_its_rate_limit_asks(monkeypatch):
+    from scholarmotion.providers import bodhan
+
+    answers = [
+        httpx.Response(429, headers={"retry-after": "18"}, json={"error": {"message": "slow"}}),
+        httpx.Response(200, json={"choices": [{"message": {"content": "அலை"}}]}),
+    ]
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(bodhan.asyncio, "sleep", sleep)
+    translator = BodhanTranslator(
+        api_key="limited", transport=httpx.MockTransport(lambda _request: answers.pop(0))
+    )
+    assert (await translator.translate("A wave.", "Tamil")).text == "அலை"
+    assert waits == [18.0]
+
+
+def test_links_are_protected_whole_and_come_back_unchanged():
+    # Seen live: a cited page's "%20" became a number placeholder and Bodhan's
+    # copied link digits failed the translation as "added digits".
+    link = "https://labs.phys.utk.edu/mbreinig/phys421/modules/AI%20Tutor.html"
+    masked = mask(f"See [the notes]({link}). The sky is blue.")
+    assert [item.kind for item in masked.items] == ["url"]
+    assert link not in masked.text
+    translated = masked.text.replace("The sky is blue.", "வானம் நீலமானது.")
+    assert translation_problems(masked, translated, target_language="Tamil") == []
+    assert link in restore_screen(translated, masked, {})
+
+
+def test_digits_the_english_already_showed_are_not_counted_as_added():
+    masked = mask("Model GPT-4o explains it.")
+    leftover = masked.text.replace("explains it.", "இதை விளக்குகிறது.")
+    assert not any(
+        "were added" in p for p in translation_problems(masked, leftover, target_language="Tamil")
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_service_reports_which_translator_wrote_the_text_it_returned():
+    class Machine:
+        name = "bodhan"
+
+        def supports(self, language):
+            return True
+
+        async def translate(self, text, language):
+            return SimpleNamespace(text="வானம் நீலமானது.", truncated=False)
+
+    service = TranslationService(object(), Machine())
+    await service.translate("The sky is blue.", source_language="English", target_language="Tamil")
+    assert service.last_translator == "bodhan"
+
+
+def test_a_cited_markdown_link_keeps_its_title_and_address_untranslated():
+    # Seen live: link 5's title held STEM terms, the translation moved words around
+    # them and the learner saw broken link text instead of a link.
+    link = (
+        "[AI tutoring for STEM: from explanation to application | Tutezy]"
+        "(https://tutezy.ai/blog/ai-tutoring-for-stem-education/)"
+    )
+    masked = mask(f"5. {link}", key_terms=["STEM", "AI"])
+    assert [item.text for item in masked.items if item.kind == "url"] == [link]
+    assert "STEM" not in masked.text and "tutezy" not in masked.text
+    assert restore_screen(masked.text, masked, {"stem": "அறிவியல்"}) == f"5. {link}"

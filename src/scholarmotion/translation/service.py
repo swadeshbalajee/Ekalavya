@@ -48,6 +48,10 @@ class _Glossary(BaseModel):
     terms: list[_GlossaryEntry] = Field(default_factory=list)
 
 
+class _Terms(BaseModel):
+    terms: list[str] = Field(default_factory=list)
+
+
 def _remove_inline_math_delimiters(text: str) -> str:
     """Keep variable names readable when a presentation label uses Markdown math."""
     return re.sub(r"\$([^$]+)\$", r"\1", text)
@@ -87,6 +91,9 @@ class TranslationService:
         # Optional machine translator (Bodhan) used first for the languages it covers.
         self.machine = machine
         self.events: list[dict] = []
+        # Who wrote the text the last translate() returned, e.g. "bodhan" or the
+        # LLM's model id, so a chat reply can say which translator it shows.
+        self.last_translator: str | None = None
         self._glossary: dict[tuple[str, str], str] = {}
         self._limit = asyncio.Semaphore(MAX_PARALLEL_TRANSLATIONS)
 
@@ -109,22 +116,62 @@ class TranslationService:
         *,
         source_language: str | None = None,
         target_language: str = CANONICAL_LANGUAGE,
+        key_terms: list[str] | tuple[str, ...] = (),
     ) -> str:
-        """Checked translation of free text (chat replies, requests)."""
+        """Checked translation of free text (chat replies, requests).
+
+        ``key_terms`` stay in English, followed by their native name in brackets
+        where the language has one, as on screen in a video.
+        """
         if not text.strip() or (_is_english(source_language) and _is_english(target_language)):
             return text
         # Offline mock mode is deliberately transparent rather than pretending
         # it has translated text. Hosted/local providers perform the real work.
         if self._offline:
             return text
-        masked = mask(text)
+        masked = mask(text, key_terms=key_terms)
         with usage_stage("translation"):
-            [result] = await self._translate_all([masked], target_language)
+            glossary = await self.glossary(tuple(key_terms), target_language)
+            # Into the learner's language the best attempt beats the English original;
+            # into English (what agents read) only a checked translation will do.
+            sources: list[str | None] = [None]
+            [result] = await self._translate_all(
+                [masked],
+                target_language,
+                best_effort=not _is_english(target_language),
+                sources=sources,
+            )
+        self.last_translator = sources[0] if result is not None else None
         if result is None:
             if _is_english(target_language):
                 raise RuntimeError("translation to English failed its checks")
             return text
-        return restore_screen(result, masked, {})
+        return restore_screen(result, masked, glossary)
+
+    async def stem_terms(self, text: str) -> list[str]:
+        """The STEM terms of an English text, to keep in English when it is translated."""
+        if self._offline or not hasattr(self.provider, "generate_structured"):
+            return []
+        prompt = (
+            "List the STEM technical terms in this text: scientific, mathematical and "
+            "engineering words or phrases (for example 'Rayleigh scattering', 'wavelength', "
+            "'vector space'), each exactly as written in the text. Leave out everyday words, "
+            "names of people and numbers. Return an empty list when there are none.\n\nTEXT:\n"
+            + text
+        )
+        try:
+            with usage_stage("translation"):
+                result = await self.provider.generate_structured(prompt, _Terms)
+        except Exception as error:  # noqa: BLE001 - the reply is then translated as plain text
+            logger.warning("Could not find the STEM terms to keep in English: %s", error)
+            return []
+        lowered = text.casefold()
+        return [
+            term.strip()
+            for term in result.terms
+            # Only English terms: a term in another script has nothing left to keep.
+            if term.strip().casefold() in lowered and any(c.isascii() and c.isalpha() for c in term)
+        ]
 
     async def localize_scene(
         self,
@@ -199,22 +246,8 @@ class TranslationService:
         if _is_english(language) or not terms:
             return {}
         missing = [term for term in terms if (term.casefold(), language) not in self._glossary]
-        machine = self._machine_for(language)
-        if missing and machine is not None:
-
-            async def native(term: str) -> tuple[str, str | None]:
-                try:
-                    async with self._limit:
-                        result = await machine.translate(term, language)
-                    return term, result.text if not result.truncated else None
-                except Exception as error:  # noqa: BLE001 - the LLM fills the gap below
-                    logger.warning("Glossary term %r failed on %s: %s", term, machine.name, error)
-                    return term, None
-
-            for term, value in await asyncio.gather(*(native(term) for term in missing)):
-                if _usable_term(term, value):
-                    self._glossary[(term.casefold(), language)] = value.strip()
-            missing = [term for term in terms if (term.casefold(), language) not in self._glossary]
+        # One request names every term; a request per term to the machine translator
+        # ran into its rate limit and held a long reply up for minutes.
         if missing and hasattr(self.provider, "generate_structured") and not self._offline:
             prompt = (
                 f"Give the established {language} name for each STEM term, as used in "
@@ -226,8 +259,24 @@ class TranslationService:
                 for entry in result.terms:
                     if entry.english in missing and _usable_term(entry.english, entry.native):
                         self._glossary[(entry.english.casefold(), language)] = entry.native.strip()
-            except Exception as error:  # noqa: BLE001 - terms then show in English only
+            except Exception as error:  # noqa: BLE001 - the machine translator fills the gap below
                 logger.warning("Glossary for %s failed: %s", language, error)
+            missing = [term for term in terms if (term.casefold(), language) not in self._glossary]
+        machine = self._machine_for(language)
+        if missing and machine is not None:
+
+            async def native(term: str) -> tuple[str, str | None]:
+                try:
+                    async with self._limit:
+                        result = await machine.translate(term, language)
+                    return term, result.text if not result.truncated else None
+                except Exception as error:  # noqa: BLE001 - such terms show in English only
+                    logger.warning("Glossary term %r failed on %s: %s", term, machine.name, error)
+                    return term, None
+
+            for term, value in await asyncio.gather(*(native(term) for term in missing)):
+                if _usable_term(term, value):
+                    self._glossary[(term.casefold(), language)] = value.strip()
         return {
             term.casefold(): self._glossary[(term.casefold(), language)]
             for term in terms
@@ -235,14 +284,22 @@ class TranslationService:
         }
 
     async def _translate_all(
-        self, items: list[MaskedText], language: str, *, best_effort: bool = False
+        self,
+        items: list[MaskedText],
+        language: str,
+        *,
+        best_effort: bool = False,
+        sources: list[str | None] | None = None,
     ) -> list[str | None]:
         """Translate and check each item; None where it still fails after one fix.
 
         With ``best_effort`` the attempt with the fewest problems is returned
-        instead of None, as long as it is a usable translation.
+        instead of None, as long as it is a usable translation. ``sources``, when
+        given, receives the translator of each returned text.
         """
+        llm = getattr(self.provider, "model", None) or "llm"
         drafts: list[str | None] = [None] * len(items)
+        origins: list[str | None] = [None] * len(items)
         truncated = [False] * len(items)
         # Strings that are only placeholders, punctuation or blank need no translator.
         pending = [index for index, item in enumerate(items) if _needs_translation(item)]
@@ -256,6 +313,7 @@ class TranslationService:
                     async with self._limit:
                         result = await machine.translate(items[index].text, language)
                     drafts[index], truncated[index] = result.text, result.truncated
+                    origins[index] = machine.name
                 except Exception as error:  # noqa: BLE001 - the LLM translator retries it
                     logger.warning("%s translation failed: %s", machine.name, error)
 
@@ -271,15 +329,20 @@ class TranslationService:
                 batch = await self.provider.generate_structured(prompt, _Batch)
                 if len(batch.translations) == len(items):
                     drafts = list(batch.translations)
+                    origins = [llm] * len(items)
             except Exception as error:  # noqa: BLE001 - each string is retried alone below
                 logger.warning("Batch translation failed: %s", error)
 
+        def chosen(index: int, translator: str | None) -> None:
+            if sources is not None:
+                sources[index] = translator
+
         async def settle(index: int) -> str | None:
             item = items[index]
-            draft = drafts[index]
+            draft, origin = drafts[index], origins[index]
             if draft is None:
                 # No machine or batch result: the LLM makes the first attempt.
-                draft = await self._llm_translate(item, language, [])
+                draft, origin = await self._llm_translate(item, language, []), llm
             problems = (
                 translation_problems(
                     item, draft, target_language=language, truncated=truncated[index]
@@ -289,6 +352,7 @@ class TranslationService:
             )
             if not problems:
                 self._note_names(item, draft)
+                chosen(index, origin)
                 return draft
             fixed = await self._llm_translate(item, language, problems)
             remaining = (
@@ -299,16 +363,18 @@ class TranslationService:
             if not remaining:
                 self._event("fixed", item.source, problems)
                 self._note_names(item, fixed)
+                chosen(index, llm)
                 return fixed
             if best_effort:
                 usable = [
-                    (found, text)
-                    for found, text in ((problems, draft), (remaining, fixed))
+                    (found, text, by)
+                    for found, text, by in ((problems, draft, origin), (remaining, fixed, llm))
                     if text and any(ch.isalpha() for ch in TOKEN.sub("", text))
                 ]
                 if usable:
-                    found, text = min(usable, key=lambda pair: len(pair[0]))
+                    found, text, by = min(usable, key=lambda attempt: len(attempt[0]))
                     self._event("kept_with_problems", item.source, found)
+                    chosen(index, by)
                     return text
             self._event("fallback", item.source, remaining)
             return None

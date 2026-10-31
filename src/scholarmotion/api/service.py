@@ -1286,14 +1286,18 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
             project.status = "COMPLETE"
             verification_summary, verification_metadata = _verification_chat_summary(result)
             display_summary = verification_summary
-            if project.text_language.casefold() != "english":
+            # Posted in the chat, so in the chat's language rather than the video's.
+            chat_language = project.chat_language or "English"
+            if chat_language.casefold() != "english":
                 try:
-                    display_summary = await TranslationService(
+                    translator = TranslationService(
                         create_translation_provider(settings), create_machine_translator(settings)
-                    ).translate(
+                    )
+                    display_summary = await translator.translate(
                         verification_summary,
                         source_language="English",
-                        target_language=project.text_language,
+                        target_language=chat_language,
+                        key_terms=await translator.stem_terms(verification_summary),
                     )
                 except Exception as error:  # noqa: BLE001 - QA proof must not disappear on translation failure
                     logger.warning("Could not localize completion QA chat summary: %s", error)
@@ -1304,7 +1308,9 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     role="assistant",
                     canonical_text=verification_summary,
                     display_text=display_summary,
-                    language=project.text_language,
+                    language=chat_language
+                    if display_summary != verification_summary
+                    else "English",
                     action="verification_complete",
                     metadata_json=verification_metadata,
                 )
@@ -1327,7 +1333,7 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                         role="assistant",
                         canonical_text=failure_summary,
                         display_text=failure_summary,
-                        language=project.text_language,
+                        language="English",
                         action="verification_failed",
                         metadata_json=failure_metadata,
                     )
