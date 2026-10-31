@@ -367,7 +367,7 @@ async def write_script(
         curated = curriculum.kind == "curated"
         outline = "\n".join(
             f"Segment {i}: {item.title}; {item.objective}; {seconds:.1f} seconds, "
-            f"at most {max(18, round(seconds * 2))} spoken words."
+            f"about {max(18, round(seconds * 2))} spoken words."
             for i, (_, item, seconds) in enumerate(slots, 1)
         )
         plan_text = ""
@@ -408,8 +408,9 @@ async def write_script(
             + "Each scene continues the previous one, with consistent symbols, numbers "
             "and example. Never announce a next scene unless that scene actually follows. "
             "The final segment must finish the explanation and then close naturally as ENDING "
-            "describes, not with a teaser, a new topic, or an unfinished calculation. Respect "
-            "every word budget."
+            "describes, not with a teaser, a new topic, or an unfinished calculation. Keep "
+            "close to each segment's word target, but never drop an explanation the lesson "
+            "needs to meet it: a segment that runs over only makes that scene a little longer."
         )
 
         def accept(
@@ -498,9 +499,12 @@ async def write_script(
                 draft = await fit_to_plan(draft)
                 review = await provider.generate_structured(
                     "Review this entire STEM lesson against the request and source evidence. "
-                    "Judge it as a lesson of the stated length: every segment has a strict word "
-                    "budget, so do not demand background or extra concepts that cannot fit; a "
-                    "short lesson should teach the core idea well. Set blocking=true only for "
+                    "Judge it as a lesson of the stated length: every segment has a word target, "
+                    "so do not demand background or extra concepts that cannot fit; a short "
+                    "lesson should teach the core idea well. Never set blocking=true for length "
+                    "alone: a segment over its word target only makes that scene longer, since "
+                    "each scene runs as long as its narration; mention it at most as a minor "
+                    "note. Set blocking=true only for "
                     "wrong mathematics or facts, inconsistent worked values, a missing core idea "
                     "the learner asked about, symbols used but never explained, broken scene "
                     "transitions, or an ending that stops mid-thought, teases more content, or "
@@ -538,7 +542,7 @@ async def write_script(
                         prompt
                         + "\nRevise this draft:\n"
                         + draft.model_dump_json()
-                        + "\nFix these review problems within the word budgets:\n"
+                        + "\nFix these review problems, staying near the word targets:\n"
                         + "\n".join(review.problems),
                         LessonScript,
                     )
