@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import re
 import time
 import wave
@@ -31,6 +32,7 @@ from scholarmotion.schemas import TTSResult
 
 DEFAULT_BASE_URL = "https://api.bodhan.ai"
 TTS_MODEL = "indic-speak"
+logger = logging.getLogger(__name__)
 TRANSLATE_MODEL = "indic-translate"
 SAMPLE_RATE = 24_000
 # Our supported languages that Bodhan also covers. The rest (Arabic, French,
@@ -67,7 +69,16 @@ class BodhanError(RuntimeError):
 # parallel limit, and going over it is answered with 429s that stall every caller.
 PARALLEL_PER_KEY = 2
 MAX_RETRY_AFTER_SECONDS = 30.0
+# Bodhan's rate limit is per minute: a 429 is waited out with growing pauses for
+# up to about three minutes (3, 6, 12, 24, 30, 30, 30, 30 s), never given up on
+# after a few seconds. A scene must not lose its narration to a busy minute, and
+# every scene keeps the one narrator, so there is no other voice to switch to.
+RATE_LIMIT_ATTEMPTS = 9
+OTHER_ERROR_ATTEMPTS = 3
 _in_flight: dict[tuple[str, int], asyncio.Semaphore] = {}
+# After a 429, every request on that key waits until this time (loop clock), so
+# parallel scenes pause together instead of each hammering the limit.
+_cooldown_until: dict[tuple[str, int], float] = {}
 
 
 def _wait_seconds(response: httpx.Response, attempt: int) -> float:
@@ -75,28 +86,41 @@ def _wait_seconds(response: httpx.Response, attempt: int) -> float:
     try:
         return min(float(response.headers["retry-after"]), MAX_RETRY_AFTER_SECONDS)
     except (KeyError, ValueError):
+        if response.status_code == 429:
+            return min(3.0 * 2**attempt, MAX_RETRY_AFTER_SECONDS)
         return 1.5 * (attempt + 1)
 
 
 async def _post(client: httpx.AsyncClient, url: str, api_key: str, payload: dict) -> httpx.Response:
-    """POST with up to three attempts on rate limits and server errors."""
+    """POST, waiting out rate limits patiently and retrying server errors a few times."""
     # Keyed by event loop too: a semaphore belongs to the loop it is first used on.
-    key = (api_key, id(asyncio.get_running_loop()))
+    loop = asyncio.get_running_loop()
+    key = (api_key, id(loop))
     limit = _in_flight.setdefault(key, asyncio.Semaphore(PARALLEL_PER_KEY))
-    for attempt in range(3):
-        wait = 1.5 * (attempt + 1)
+    errors = 0  # failures other than rate limits
+    own_pause = None  # the cooldown this request set and already slept through
+    for attempt in range(RATE_LIMIT_ATTEMPTS):
+        last = attempt == RATE_LIMIT_ATTEMPTS - 1
+        wait = 1.5 * (errors + 1)
         try:
             async with limit:
+                until = _cooldown_until.get(key, 0.0)
+                pause = until - loop.time()
+                if pause > 0 and until != own_pause:
+                    await asyncio.sleep(pause)
                 response = await client.post(
                     url, headers={"Authorization": f"Bearer {api_key}"}, json=payload
                 )
         except httpx.HTTPError as error:
-            if attempt == 2:
+            errors += 1
+            if errors >= OTHER_ERROR_ATTEMPTS or last:
                 raise BodhanError(f"request failed: {error}") from error
         else:
             if response.status_code < 400:
                 return response
-            if response.status_code not in _RETRY_STATUS or attempt == 2:
+            if response.status_code != 429:
+                errors += 1
+            if response.status_code not in _RETRY_STATUS or errors >= OTHER_ERROR_ATTEMPTS or last:
                 try:
                     detail = response.json().get("error", {})
                 except ValueError:
@@ -106,6 +130,10 @@ async def _post(client: httpx.AsyncClient, url: str, api_key: str, payload: dict
                     f"{detail.get('message', response.text[:200])}"
                 )
             wait = _wait_seconds(response, attempt)
+            if response.status_code == 429:
+                _cooldown_until[key] = max(_cooldown_until.get(key, 0.0), loop.time() + wait)
+                own_pause = _cooldown_until[key]
+                logger.info("Bodhan rate limit; waiting %.0f s (attempt %d)", wait, attempt + 1)
         await asyncio.sleep(wait)
     raise BodhanError("request failed")
 

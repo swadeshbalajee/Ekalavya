@@ -1791,8 +1791,14 @@ async def edit_range(
             old_index = before.index(slot.key) if slot.key in before else None
             was_after = before[old_index - 1] if old_index else None
             now_after = slots[index - 1].key if index else None
-            if slot.new_text or slot.row is None or was_after != now_after:
+            if slot.new_text or slot.row is None:
+                # New words: both its opening and the scene after it are checked.
                 boundaries.update({index, index + 1})
+            elif was_after != now_after:
+                # Only its neighbour changed: just its own opening is checked. The
+                # scene after it still follows the same words, so it is left alone
+                # (checking it rebuilt an untouched scene after an insert).
+                boundaries.add(index)
         if not localization_only and boundaries:
             fixes = await review_transitions(
                 planner, [(slot.key, slot.spec.narration) for slot in slots], sorted(boundaries)

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from scholarmotion.providers import bodhan
 from scholarmotion.providers.bodhan import (
     BodhanTranslation,
     BodhanTranslator,
@@ -336,7 +337,6 @@ async def test_bodhan_translation_uses_the_chat_route_its_keys_reach():
 
 @pytest.mark.asyncio
 async def test_bodhan_waits_as_long_as_its_rate_limit_asks(monkeypatch):
-    from scholarmotion.providers import bodhan
 
     answers = [
         httpx.Response(429, headers={"retry-after": "18"}, json={"error": {"message": "slow"}}),
@@ -402,3 +402,42 @@ def test_a_cited_markdown_link_keeps_its_title_and_address_untranslated():
     assert [item.text for item in masked.items if item.kind == "url"] == [link]
     assert "STEM" not in masked.text and "tutezy" not in masked.text
     assert restore_screen(masked.text, masked, {"stem": "அறிவியல்"}) == f"5. {link}"
+
+
+@pytest.mark.asyncio
+async def test_a_busy_minute_is_waited_out_rather_than_dropping_a_scene(monkeypatch):
+    # Seen live: Bodhan answered 46 rate-limit 429s (no retry-after) while 17 scenes
+    # were narrated at once; three tries over 4.5 s gave up and two scenes were lost.
+    answers = [httpx.Response(429, json={"detail": "Maximum rate limit reached"})] * 8 + [
+        httpx.Response(200, json={"choices": [{"message": {"content": "அலை"}}]})
+    ]
+    waits = []
+
+    async def sleep(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(bodhan.asyncio, "sleep", sleep)
+    bodhan._cooldown_until.clear()
+    translator = BodhanTranslator(
+        api_key="busy", transport=httpx.MockTransport(lambda _request: answers.pop(0))
+    )
+    assert (await translator.translate("A wave.", "Tamil")).text == "அலை"
+    assert waits == [3.0, 6.0, 12.0, 24.0, 30.0, 30.0, 30.0, 30.0]
+
+
+@pytest.mark.asyncio
+async def test_server_errors_still_give_up_after_three_tries(monkeypatch):
+    calls = []
+
+    def handler(_request):
+        calls.append(1)
+        return httpx.Response(503, text="down")
+
+    async def sleep(_seconds):
+        pass
+
+    monkeypatch.setattr(bodhan.asyncio, "sleep", sleep)
+    translator = BodhanTranslator(api_key="down", transport=httpx.MockTransport(handler))
+    with pytest.raises(bodhan.BodhanError):
+        await translator.translate("A wave.", "Tamil")
+    assert len(calls) == 3
