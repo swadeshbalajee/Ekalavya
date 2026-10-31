@@ -67,6 +67,19 @@ async def web_research(
     return chunks
 
 
+def cited_sources(text: str, sources: list[dict]) -> list[dict]:
+    """The search results the answer actually cites, by link or by [n] marker.
+
+    A web search returns results whether or not the answer used them; only
+    the ones it cites are shown as sources.
+    """
+    cited = [source for source in sources if source.get("url") and source["url"] in text]
+    if cited:
+        return cited
+    markers = {int(n) for n in re.findall(r"\[(\d{1,2})\](?!\()", text)}
+    return [source for index, source in enumerate(sources, 1) if index in markers]
+
+
 def format_sources(sources: list[dict]) -> str:
     if not sources:
         return ""

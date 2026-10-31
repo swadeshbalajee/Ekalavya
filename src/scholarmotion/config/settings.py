@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     # relevant material (OpenRouter web plugin). Citations are shown to learners.
     web_search_enabled: bool = True
     web_search_max_results: int = Field(default=5, ge=1, le=10)
+    # A small, cheap model screens every learner message against the
+    # education-only rules before anything else runs. Empty turns it off. It
+    # uses the main model's provider, key and base URL.
+    guardrail_model: str | None = "openai/gpt-oss-safeguard-20b"
+    guardrail_timeout_seconds: float = Field(default=10, ge=1, le=60)
+    # When the screen itself fails (timeout, outage): true lets the message
+    # through and logs it; false declines the message.
+    guardrail_allow_on_error: bool = True
     tts_provider: str = "mock"
     tts_api_key: str | None = None
     tts_model: str = "deterministic-v1"
@@ -171,6 +179,8 @@ class Settings(BaseSettings):
     qdrant_source_collection: str = "scholarmotion_source_chunks"
     qdrant_skill_collection: str = "scholarmotion_skills"
     qdrant_knowledge_collection: str = "scholarmotion_knowledge"
+    # Each answered quiz question, so lessons can be shaped by what a learner got right.
+    qdrant_learner_collection: str = "scholarmotion_learner_evidence"
 
     embedding_provider: str = "local"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

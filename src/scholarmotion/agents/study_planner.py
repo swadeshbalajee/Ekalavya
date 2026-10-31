@@ -70,6 +70,7 @@ async def plan_study(
     videos: list[dict],
     progress: str = "",
     instruction: str = "",
+    learner_notes: str = "",
 ) -> StudyPlanDraft:
     """A plan whose watch tasks only point at videos the learner can open."""
     if llm is None or getattr(llm, "name", "") == "mock":
@@ -93,6 +94,12 @@ async def plan_study(
         prompt += f"\nPROGRESS SO FAR (replan the remaining days from this):\n{progress}\n"
     if instruction:
         prompt += f"\nTHE LEARNER ASKS: {instruction}\n"
+    if learner_notes:
+        prompt += (
+            "\nPRIVATE NOTES ON THIS LEARNER (give more time, practice and review to what they "
+            "missed, less to what they know; never mention the notes, scores or weaknesses in "
+            f"titles, details or the summary):\n{learner_notes}\n"
+        )
     try:
         with usage_stage("study_plan"):
             draft = await llm.generate_structured(prompt, StudyPlanDraft)

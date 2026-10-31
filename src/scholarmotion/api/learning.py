@@ -51,6 +51,7 @@ from scholarmotion.persistence.models import (
 from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.providers import create_llm_provider
 from scholarmotion.services.embeddings import embed_texts
+from scholarmotion.services.learner_record import index_attempt, learner_notes
 from scholarmotion.services.usage_records import new_run_id, usage_rows
 
 logger = get_logger(__name__)
@@ -1258,6 +1259,7 @@ def create_learning_router(
                     minutes_per_day=payload.minutes_per_day,
                     language=language,
                     videos=videos,
+                    learner_notes=await learner_notes(session, settings, user_id, payload.goal),
                 )
             except StudyPlanUnavailable as error:
                 raise HTTPException(503, f"The study planner is unavailable: {error}") from error
@@ -1333,6 +1335,7 @@ def create_learning_router(
                     videos=videos,
                     progress=progress,
                     instruction=payload.instruction.strip(),
+                    learner_notes=await learner_notes(session, settings, user_id, plan.goal),
                 )
             except StudyPlanUnavailable as error:
                 raise HTTPException(503, f"The study planner is unavailable: {error}") from error
@@ -1441,6 +1444,12 @@ def create_learning_router(
                     scenes=scenes,
                     language=language,
                     instruction=payload.instruction.strip(),
+                    learner_notes=await learner_notes(
+                        session,
+                        settings,
+                        user_id,
+                        f"{title} {topic or (project.original_request or project.request)}",
+                    ),
                 )
             except QuizUnavailable as error:
                 raise HTTPException(503, f"The quiz writer is unavailable: {error}") from error
@@ -1525,16 +1534,17 @@ def create_learning_router(
                 }
             )
         score = sum(item["correct"] for item in results) / len(results) if results else 0.0
-        session.add(
-            QuizAttempt(
-                quiz_id=quiz.id,
-                user_id=quiz.owner_id,
-                answers=answers,
-                results=results,
-                score=score,
-            )
+        attempt = QuizAttempt(
+            quiz_id=quiz.id,
+            user_id=quiz.owner_id,
+            answers=answers,
+            results=results,
+            score=score,
         )
+        session.add(attempt)
         await session.commit()
+        # Each answered question goes into the vector index that later lessons consult.
+        await index_attempt(settings, quiz, attempt)
         return {"score": score, "results": results}
 
     # ------------------------------------------------------------ home

@@ -635,8 +635,27 @@ class TransitionReview(BaseModel):
     fixes: list[BridgeFix] = Field(default_factory=list)
 
 
+def _private_notes(teaching_notes: str) -> str:
+    """The learner's teaching notes as a prompt block; empty when there are none."""
+    if not teaching_notes.strip():
+        return ""
+    return (
+        "PRIVATE TEACHING NOTES (from the learner's quizzes and earlier chats: briefly recap a "
+        "weak prerequisite before using it, explain the steps that rely on it more deeply, "
+        "and move faster through what the learner knows; never mention the notes, past "
+        "results or weaknesses "
+        f"in the narration):\n{teaching_notes.strip()}\n\n"
+    )
+
+
 async def write_new_scene(
-    provider, instruction: str, *, before: str = "", after: str = "", seconds: float = 40
+    provider,
+    instruction: str,
+    *,
+    before: str = "",
+    after: str = "",
+    seconds: float = 40,
+    teaching_notes: str = "",
 ) -> ScriptSegment:
     """Narration for a scene inserted into a finished lesson, between two existing ones."""
     return await provider.generate_structured(
@@ -647,7 +666,8 @@ async def write_new_scene(
         f"WHAT THE NEW SCENE SHOULD TEACH: {instruction}\n"
         f"SCENE BEFORE IT: {before or '(none; this opens the lesson)'}\n"
         f"SCENE AFTER IT: {after or '(none; this ends the lesson, so close it naturally)'}\n"
-        "Return the narration, a short title, a learning_objective, equations and key_terms.",
+        + _private_notes(teaching_notes)
+        + "Return the narration, a short title, a learning_objective, equations and key_terms.",
         ScriptSegment,
     )
 
@@ -737,6 +757,7 @@ async def revise_narration(
     before: str = "",
     after: str = "",
     is_closing: bool = False,
+    teaching_notes: str = "",
 ) -> str:
     """Rewrite narration to satisfy a student's clarification request.
 
@@ -756,6 +777,7 @@ async def revise_narration(
             if before or after
             else ""
         )
+        + _private_notes(teaching_notes)
         + f"CURRENT NARRATION:\n{narration}\n\n"
         "REVISED NARRATION:"
     )

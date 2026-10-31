@@ -64,6 +64,12 @@ class LessonPreparation(BaseModel):
     # in Tamil"); empty keeps the chat's current language.
     chat_language: str = ""
     retrieval_query: str = ""
+    # For answer: whether the reply needs a live web search (current or specific facts,
+    # or the learner asked for sources). A concept explanation does not.
+    web_search: bool = False
+    # For generate_video and edit_video: private guidance from LEARNER NOTES on what to emphasise or
+    # go faster on; the learner never sees it.
+    teaching_notes: str = ""
     # Links (from the latest turn or earlier in the chat) the learner wants used as sources.
     source_links: list[str] = Field(default_factory=list)
     # How a lesson based on given sources may use outside material:
@@ -183,6 +189,7 @@ async def prepare_lesson(
     input_language_hint: str | None = None,
     video_status: str = "no video yet",
     chat_language: str = "English",
+    learner_notes: str = "",
 ) -> LessonPreparation:
     """Let the planner model decide what this turn asks for, then validate it."""
     fallback = fallback_preparation(
@@ -320,6 +327,18 @@ Return these decisions:
 - request_type: concept_explanation, equation_explanation, figure_explanation,
   paper_explanation, paper_section_explanation or comparison.
 - retrieval_query: a focused search query for attached or library sources.
+- web_search: for answer, true only when a good reply needs a live web search: recent or
+  changing facts (news, prices, releases, records), specific figures or details you may not
+  know reliably, or the learner asks for sources, links or references. False for explaining a
+  concept, solving a problem, a follow-up, small talk, or anything about this chat or video.
+- teaching_notes: for generate_video and edit_video, when LEARNER NOTES bear on this lesson
+  or the scenes being changed, two to four private sentences for the lesson writer. Name the
+  prerequisites of this topic the learner is weak in (from AREAS NEEDING WORK and missed
+  answers) and ask for a short refresher of them before they are used and a deeper, slower
+  explanation of each step that relies on them (an SVD lesson for a learner weak in basis and
+  dimension recaps both first and slows down where rank and orthonormal bases appear). Say
+  which ideas the learner already knows well and can move through quickly. Never put scores
+  or weaknesses in canonical_request or reply. Empty when the notes are not relevant.
 - known_concepts, unknown_concepts, preferred_examples, accessibility_needs,
   content_constraints, parental_guidance: only what the context supports; never guess.
 - rationale: one short sentence explaining the decision.
@@ -333,6 +352,8 @@ text={project_text_language!r}; voice={project_voice_language!r}
 CHAT LANGUAGE (what the chat replies in now): {chat_language!r}
 SAVED LEARNER CONTEXT (empty means none has been configured):
 {context}
+LEARNER NOTES (private; from the learner's quizzes, study plan and earlier chats):
+{learner_notes or "(none)"}
 RECENT CONVERSATION (oldest first):
 {conversation or "(none)"}
 VIDEO STATUS: {video_status}
@@ -411,6 +432,11 @@ def _validated(
         if word.strip() and spoken.strip() and word.strip() != spoken.strip()
     }
     result.reply = result.reply.strip()
+    result.teaching_notes = result.teaching_notes.strip()[:1200]
+    if result.action != "answer":
+        result.web_search = False
+    if result.action not in {"generate_video", "edit_video", "answer"}:
+        result.teaching_notes = ""
     if result.action in {"edit_video", "localize_video"} and not video_scenes:
         result.action = "answer"
     if result.duration_minutes is not None:

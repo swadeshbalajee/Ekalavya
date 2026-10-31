@@ -329,8 +329,17 @@ class OpenAICompatibleProvider:
         reasoning_effort: str | None = None,
         web_search: bool = False,
         max_results: int = 5,
+        system: str | None = None,
     ) -> tuple[str, list[dict[str, str]]]:
-        """Answer with optional thinking budget and live web search, returning citations."""
+        """Answer with optional thinking budget and live web search, returning citations.
+
+        With ``system``, instructions and context go in a system message and
+        ``prompt`` is the question alone, so a web search runs on the question
+        rather than on the instructions.
+        """
+        messages = [{"role": "user", "content": prompt}]
+        if system:
+            messages.insert(0, {"role": "system", "content": system})
 
         def extra_body(model: str) -> dict[str, Any]:
             body: dict[str, Any] = {}
@@ -345,7 +354,7 @@ class OpenAICompatibleProvider:
         response = await self._with_fallback(
             lambda model: self.client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=self._temperature(temperature),
                 **extra_body(model),
             ),

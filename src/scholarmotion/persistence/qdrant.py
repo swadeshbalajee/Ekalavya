@@ -20,6 +20,7 @@ class QdrantConfig:
     skill_collection: str
     dimensions: int
     knowledge_collection: str = "scholarmotion_knowledge"
+    learner_collection: str = "scholarmotion_learner_evidence"
 
     @classmethod
     def from_settings(cls, settings: Settings) -> QdrantConfig:
@@ -30,6 +31,7 @@ class QdrantConfig:
             skill_collection=settings.qdrant_skill_collection,
             dimensions=settings.embedding_dimensions,
             knowledge_collection=settings.qdrant_knowledge_collection,
+            learner_collection=settings.qdrant_learner_collection,
         )
 
 
@@ -69,6 +71,7 @@ class QdrantVectorStore:
                 self.config.source_collection,
                 self.config.skill_collection,
                 self.config.knowledge_collection,
+                self.config.learner_collection,
             ):
                 if not await client.collection_exists(name):
                     await client.create_collection(
@@ -111,6 +114,16 @@ class QdrantVectorStore:
     ) -> list[tuple[str, float, dict[str, Any]]]:
         return await self._query(
             self.config.knowledge_collection, vector, filters={"owner_id": owner_id}, limit=limit
+        )
+
+    async def upsert_learner_evidence(self, points: list[dict[str, Any]]) -> None:
+        await self._upsert(self.config.learner_collection, points)
+
+    async def query_learner_evidence(
+        self, vector: list[float], *, owner_id: str, limit: int = 8
+    ) -> list[tuple[str, float, dict[str, Any]]]:
+        return await self._query(
+            self.config.learner_collection, vector, filters={"owner_id": owner_id}, limit=limit
         )
 
     async def reconcile_collection(self, collection: str, points: list[dict[str, Any]]) -> None:

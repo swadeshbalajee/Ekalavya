@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass, replace
@@ -11,6 +12,7 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from scholarmotion.agents.guardrail import screen_message
 from scholarmotion.agents.lesson_preparation import SceneEdit, prepare_lesson
 from scholarmotion.config import Settings
 from scholarmotion.media.pronunciation import uses_any
@@ -28,17 +30,23 @@ from scholarmotion.persistence.models import (
 )
 from scholarmotion.persistence.storage import LocalObjectStore
 from scholarmotion.providers import (
+    create_guardrail_provider,
     create_llm_provider,
     create_machine_translator,
     create_translation_provider,
 )
 from scholarmotion.retrieval.project_papers import project_papers, project_sources
 from scholarmotion.retrieval.source_ingestion import LinkUnreadable, ingest_links
-from scholarmotion.retrieval.web_research import format_sources, supports_web_search
+from scholarmotion.retrieval.web_research import (
+    cited_sources,
+    format_sources,
+    supports_web_search,
+)
 from scholarmotion.schemas import TutorChatRequest
 from scholarmotion.services import research_settings as research
 from scholarmotion.services.chat_memory import conversation_context
 from scholarmotion.services.edit_plan import EditPlan
+from scholarmotion.services.learner_record import learner_notes
 from scholarmotion.translation import TranslationService
 from scholarmotion.verification.answers import answer_problems
 
@@ -212,9 +220,89 @@ async def respond(
     )
     session.add(user_message)
 
-    scenes = await video_scenes(session, project) if project.status == "COMPLETE" else []
-    account_text, account_voice = await _default_languages(session, project, payload)
-    preparation = await prepare_lesson(
+    # The guardrail screens the message while the planner reads it; a declined
+    # message stops before anything the planner chose is started.
+    screening = asyncio.create_task(_screen(settings, payload.message, conversation))
+    try:
+        scenes = await video_scenes(session, project) if project.status == "COMPLETE" else []
+        account_text, account_voice = await _default_languages(session, project, payload)
+        notes = await learner_notes(
+            session, settings, project.owner_id, f"{project.request}\n{payload.message}"
+        )
+        preparation = await _prepare(
+            session,
+            settings,
+            project,
+            payload,
+            conversation,
+            scenes,
+            account_text,
+            account_voice,
+            notes,
+        )
+        screen = await screening
+    finally:
+        screening.cancel()
+    if not screen.allowed:
+        user_message.metadata_json = {
+            "guardrail": {"category": screen.category, "reason": screen.reason}
+        }
+        return await _save_assistant(
+            session, translator, project, canonical=screen.reply, action="answer"
+        )
+    if preparation.chat_language:
+        # Asked to be talked to in a language: it stays until asked again.
+        project.chat_language = preparation.chat_language
+    canonical = (
+        preparation.canonical_message
+        if preparation.planned
+        else await translator.to_english(payload.message)
+    )
+    user_message.canonical_text = canonical
+    user_message.language = preparation.input_language
+    user_message.metadata_json = {
+        "lesson_preparation": preparation.model_dump(mode="json"),
+        # Exactly what the planner and tutor were told about this learner; kept out of
+        # the chat API, readable in the database for checking.
+        "learner_notes": notes,
+    }
+    text_language, voice_language = preparation.text_language, preparation.voice_language
+    return await _act(
+        session,
+        settings,
+        project,
+        payload,
+        translator,
+        preparation,
+        scenes,
+        canonical,
+        conversation,
+        prior_messages,
+        notes,
+        text_language,
+        voice_language,
+    )
+
+
+async def _screen(settings: Settings, message: str, conversation: str):
+    try:
+        llm = create_guardrail_provider(settings)
+    except ValueError as error:  # no key for the screen's provider
+        logger.warning("Guardrail model not configured: %s", error)
+        llm = None
+    return await screen_message(
+        llm,
+        message,
+        conversation=conversation,
+        timeout_seconds=settings.guardrail_timeout_seconds,
+        allow_on_error=settings.guardrail_allow_on_error,
+    )
+
+
+async def _prepare(
+    session, settings, project, payload, conversation, scenes, account_text, account_voice, notes
+):
+    return await prepare_lesson(
         create_llm_provider(settings),
         message=payload.message,
         project_request=project.request,
@@ -232,20 +320,26 @@ async def respond(
         input_language_hint=payload.language,
         video_status=_video_status(project.status),
         chat_language=project.chat_language or "English",
+        learner_notes=notes,
     )
-    if preparation.chat_language:
-        # Asked to be talked to in a language: it stays until asked again.
-        project.chat_language = preparation.chat_language
-    canonical = (
-        preparation.canonical_message
-        if preparation.planned
-        else await translator.to_english(payload.message)
-    )
-    user_message.canonical_text = canonical
-    user_message.language = preparation.input_language
-    user_message.metadata_json = {"lesson_preparation": preparation.model_dump(mode="json")}
-    text_language, voice_language = preparation.text_language, preparation.voice_language
 
+
+async def _act(
+    session,
+    settings,
+    project,
+    payload,
+    translator,
+    preparation,
+    scenes,
+    canonical,
+    conversation,
+    prior_messages,
+    notes,
+    text_language,
+    voice_language,
+) -> TutorDecision:
+    """Start what the planner decided for this turn."""
     # Links the learner gave are read into the chat's sources before anything
     # uses them. One that cannot be read is reported, never replaced by others.
     read: list[SourceDocument] = []
@@ -379,7 +473,15 @@ async def respond(
             action="answer",
         )
     answer, checks = await _tutor_answer(
-        session, settings, project, payload, conversation, canonical, prior_messages
+        session,
+        settings,
+        project,
+        payload,
+        conversation,
+        canonical,
+        prior_messages,
+        web_search=preparation.web_search,
+        notes=notes,
     )
     return await _save_assistant(
         session,
@@ -554,6 +656,7 @@ def edit_plan_for(preparation, scenes: list[Scene], canonical: str) -> EditPlan:
         pronunciations=dict(preparation.pronunciations),
         whole_video=preparation.whole_video,
         summary=instruction,
+        teaching_notes=preparation.teaching_notes,
     )
     if plan.edits:
         return plan
@@ -801,7 +904,16 @@ async def _checked_reply(llm, settings, prompt: str, body: str, context: str) ->
 
 
 async def _tutor_answer(
-    session, settings, project, payload, conversation, canonical, prior_messages
+    session,
+    settings,
+    project,
+    payload,
+    conversation,
+    canonical,
+    prior_messages,
+    *,
+    web_search: bool = False,
+    notes: str = "",
 ) -> tuple[str, dict | None]:
     retrieval_query = " ".join(
         [message.canonical_text for message in prior_messages if message.role == "user"][-3:]
@@ -815,10 +927,14 @@ async def _tutor_answer(
         ), None
     llm = create_llm_provider(settings)
     effort = payload.reasoning_effort or settings.tutor_reasoning_effort
+    # The planner decides whether this reply needs the web; explaining a concept does not.
     use_web = (
-        settings.web_search_enabled and paper_context == NO_SOURCES and supports_web_search(llm)
+        web_search
+        and settings.web_search_enabled
+        and paper_context == NO_SOURCES
+        and supports_web_search(llm)
     )
-    prompt = (
+    system = (
         "You are a patient STEM tutor for a student who may phrase questions loosely. Answer "
         "in canonical English using the context below and clear Markdown. Always write the "
         "answer in English, even when the learner asks for another language: a later step "
@@ -834,19 +950,27 @@ async def _tutor_answer(
         "attached, ground claims in them, cite them as [source, p. N], and say when they do "
         "not support an answer."
         + (
-            " Search the web for accurate, current information and rely on reputable sources."
+            " Search the web for accurate, current information, rely on reputable sources and "
+            "link each source you use inline."
             if use_web
-            else ""
+            else " Do not add a list of sources or links of your own."
         )
+        + " You can see the learner's quiz results, study plan and earlier chats in LEARNER "
+        "NOTES; when they ask whether you can, say yes, and answer questions about them from "
+        "the notes."
         + f"\n\nLESSON REQUEST:\n{project.request}\n\nRECENT CONVERSATION (oldest first):\n"
         f"{conversation}\n\nSOURCE EXCERPTS:\n{paper_context}\n\n"
-        f"CURRENT LEARNER MESSAGE:\n{canonical}"
+        f"LEARNER NOTES:\n{notes or '(no quizzes, study plan or earlier concepts yet)'}"
     )
+    prompt = f"{system}\n\nCURRENT LEARNER MESSAGE:\n{canonical}"
     sources: list[dict] = []
     try:
         if hasattr(llm, "generate_text_with_sources"):
+            # The question goes alone in the user message, so a web search runs on it
+            # and not on the instructions above.
             body, sources = await llm.generate_text_with_sources(
-                prompt,
+                canonical,
+                system=system,
                 temperature=settings.main_llm_temperature,
                 reasoning_effort=effort,
                 web_search=use_web,
@@ -859,7 +983,8 @@ async def _tutor_answer(
         return _fallback_tutor_answer(project, canonical, paper_context).strip(), None
     context = "" if paper_context == NO_SOURCES else paper_context
     body, checks = await _checked_reply(llm, settings, prompt, body.strip(), context)
-    return (body + format_sources(sources)).strip(), checks
+    # Only the search results the answer cites are listed as its sources.
+    return (body + format_sources(cited_sources(body, sources))).strip(), checks
 
 
 async def respond_ephemeral(
@@ -870,8 +995,15 @@ async def respond_ephemeral(
         create_translation_provider(settings), create_machine_translator(settings)
     )
     input_language = payload.language or "English"
-    canonical = await translator.to_english(payload.message, source_language=input_language)
     context = "\n".join(history or [])
+    screen = await _screen(settings, payload.message, context)
+    if not screen.allowed:
+        return await translator.translate(
+            screen.reply,
+            source_language="English",
+            target_language=payload.text_language or input_language,
+        )
+    canonical = await translator.to_english(payload.message, source_language=input_language)
     if getattr(create_llm_provider(settings), "name", "") == "mock":
         answer = (
             f"Let’s explore {canonical.strip()}. Start with the core definition, "
@@ -879,18 +1011,21 @@ async def respond_ephemeral(
         )
     else:
         llm = create_llm_provider(settings)
-        prompt = (
+        system = (
             "You are a patient STEM tutor. Answer the learner directly in clear Markdown. When "
             "asked to explain a concept, give the intuition, the precise definition, each symbol "
             "of any equation, a small worked example and a common misconception; keep follow-ups "
             "short. Use inline mathematics inside $...$ and display mathematics inside $$...$$. "
+            "Link each web source you use inline. "
             "This is a temporary chat, so do not mention projects, saved lessons, or persistence.\n\n"
-            f"RECENT TEMPORARY CHAT:\n{context}\n\nLEARNER MESSAGE:\n{canonical}"
+            f"RECENT TEMPORARY CHAT:\n{context}"
         )
+        prompt = f"{system}\n\nLEARNER MESSAGE:\n{canonical}"
         sources: list[dict] = []
         if hasattr(llm, "generate_text_with_sources"):
             answer, sources = await llm.generate_text_with_sources(
-                prompt,
+                canonical,
+                system=system,
                 temperature=settings.main_llm_temperature,
                 reasoning_effort=payload.reasoning_effort or settings.tutor_reasoning_effort,
                 web_search=settings.web_search_enabled,
@@ -899,7 +1034,7 @@ async def respond_ephemeral(
         else:
             answer = await llm.generate_text(prompt, temperature=settings.main_llm_temperature)
         answer, _ = await _checked_reply(llm, settings, prompt, answer.strip(), "")
-        answer += format_sources(sources)
+        answer += format_sources(cited_sources(answer, sources))
     return await translator.translate(
         answer.strip(),
         source_language="English",

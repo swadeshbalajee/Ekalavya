@@ -689,6 +689,7 @@ class ScholarMotionPipeline:
             level=profile.target_level,
             source_scope=getattr(self, "_source_scope", "none"),
             one_pass_chars=self._depth().one_pass_chars,
+            teaching_notes=getattr(self, "_teaching_notes", ""),
         )
 
     def _reference_lookup(self, curriculum: CurriculumPlan, collected: list[dict]):
@@ -894,6 +895,7 @@ class ScholarMotionPipeline:
         """
         events = ["project.started"]
         self._source_scope = preparation.source_scope if preparation else "none"
+        self._teaching_notes = preparation.teaching_notes if preparation else ""
         self._video_version = video_version
         profile = profile_request(
             request,
@@ -2231,6 +2233,7 @@ class ScholarMotionPipeline:
                     "A reviewer of the whole lesson found a problem in this part. " + fix,
                     learning_objective=scene.spec.learning_objective or "",
                     is_closing=scene is scenes[-1],
+                    teaching_notes=getattr(self, "_teaching_notes", ""),
                 )
             )
             if narration.strip() == scene.spec.narration.strip() and pauses == scene.spec.pauses:

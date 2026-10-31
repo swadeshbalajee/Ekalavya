@@ -204,6 +204,7 @@ class LessonCurator:
         level: str,
         source_scope: str,
         one_pass_chars: int,
+        teaching_notes: str = "",
     ) -> CurriculumPlan | None:
         if getattr(self.llm, "name", "") == "mock" or not hasattr(self.llm, "generate_structured"):
             return None
@@ -214,6 +215,15 @@ class LessonCurator:
             f"of narration (about {round(minutes * 120)} spoken words in total).\n"
             f"SOURCE USE: {source_scope}"
         )
+        if teaching_notes:
+            # From the learner's quizzes and earlier chats; shapes emphasis, never said aloud.
+            context += (
+                "\nPRIVATE TEACHING NOTES (plan a short refresher section on the weak "
+                "prerequisites they name before the lesson uses them, give the steps that rely "
+                "on them more depth and time, and move faster through what the learner knows; "
+                "never mention the notes, the learner's past results or weaknesses in the "
+                f"plan, script or video): {teaching_notes}"
+            )
         task = f"{context}\nWrite the lesson plan."
         material = "\n".join(passages) or "(nothing was collected; plan from the request)"
         try:

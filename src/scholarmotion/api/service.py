@@ -117,6 +117,7 @@ from scholarmotion.services import BuildResult, ScholarMotionPipeline
 from scholarmotion.services import research_settings as research
 from scholarmotion.services.chat_memory import recall
 from scholarmotion.services.edit_plan import EditPlan
+from scholarmotion.services.learner_record import learner_notes
 from scholarmotion.services.usage_records import new_run_id, usage_rows
 from scholarmotion.skills import SkillService
 from scholarmotion.translation import TranslationService
@@ -889,6 +890,9 @@ async def run_generation(database: Database, settings: Settings, project_id: UUI
                     # Reserved contract for a versioned student persona, accessibility profile,
                     # and guardian controls when those account features are introduced.
                     learner_context={},
+                    learner_notes=await learner_notes(
+                        session, settings, project.owner_id, preparation_message
+                    ),
                     attached_papers=[paper.title for paper in papers],
                     attached_sources=[source.title for source in given_sources],
                 )
@@ -1732,6 +1736,7 @@ async def edit_range(
                     before=prev_text,
                     after=next_text,
                     seconds=slot.spec.duration_target_seconds,
+                    teaching_notes=plan.teaching_notes,
                 )
                 text, pauses = speakable_with_pauses(segment.narration, to_speakable)
                 slot.spec = slot.spec.model_copy(
@@ -1775,6 +1780,7 @@ async def edit_range(
                     before=slots[index - 1].spec.narration if index else "",
                     after=slots[index + 1].spec.narration if index + 1 < len(slots) else "",
                     is_closing=index + 1 == len(slots),
+                    teaching_notes=plan.teaching_notes,
                 )
             )
             slot.spec = slot.spec.model_copy(update={"narration": text, "pauses": pauses})

@@ -20,6 +20,9 @@ class EditPlan(BaseModel):
     whole_video: bool = False
     # The learner's request in their words, for records and the reviewer.
     summary: str = ""
+    # Private guidance from the learner's quizzes and earlier chats for the writers;
+    # never shown, spoken or checked by the reviewer.
+    teaching_notes: str = ""
 
     def encode(self) -> str:
         return PLAN_PREFIX + self.model_dump_json()

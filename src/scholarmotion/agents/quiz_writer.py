@@ -66,6 +66,7 @@ async def write_quiz(
     scenes: list[dict],
     language: str,
     instruction: str = "",
+    learner_notes: str = "",
 ) -> QuizDraft:
     """Questions on what the lesson teaches; ``scenes`` carry key, title and narration."""
     if llm is None or getattr(llm, "name", "") == "mock":
@@ -86,6 +87,12 @@ async def write_quiz(
         prompt += f"\nSCENES:\n{lesson[:24000]}\n"
     if instruction:
         prompt += f"\nTHE LEARNER ASKS: {instruction}\n"
+    if learner_notes:
+        prompt += (
+            "\nPRIVATE NOTES ON THIS LEARNER (weigh questions toward what they missed before "
+            "and keep a few on what they know; never mention the notes, past scores or "
+            f"weaknesses in any question, option or explanation):\n{learner_notes}\n"
+        )
     try:
         with usage_stage("quiz"):
             draft = await llm.generate_structured(prompt, QuizDraft)

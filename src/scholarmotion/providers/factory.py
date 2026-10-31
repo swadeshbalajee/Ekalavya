@@ -93,6 +93,27 @@ def create_planner_provider(settings: Settings):
     )
 
 
+def create_guardrail_provider(settings: Settings):
+    """The small model that screens learner messages; None when the screen is off."""
+    if not settings.guardrail_model or settings.main_llm_provider.lower() == "mock":
+        return None
+    return _create_llm(
+        settings=settings,
+        provider=settings.main_llm_provider,
+        api_key=_provider_key(
+            settings,
+            settings.main_llm_provider,
+            settings.main_llm_api_key,
+            base_url=settings.main_llm_base_url,
+        ),
+        model=settings.guardrail_model,
+        base_url=settings.main_llm_base_url,
+        # No fallback: a failed screen follows GUARDRAIL_ALLOW_ON_ERROR instead.
+        fallback_models=[],
+        structured_reasoning_effort="low",
+    )
+
+
 def _csv_models(value: str | None) -> list[str]:
     return [model.strip() for model in (value or "").split(",") if model.strip()]
 

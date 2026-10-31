@@ -147,6 +147,22 @@ logger = get_logger(__name__)
 current_user_id: ContextVar[UUID | None] = ContextVar("current_user_id", default=None)
 
 
+def _public_metadata(metadata: dict | None) -> dict:
+    """A chat message's metadata without the private learner notes the agents saw.
+
+    They stay in the database (``learner_notes``, and the planner's
+    ``teaching_notes``) for checking what the planner was given.
+    """
+    public = {key: value for key, value in (metadata or {}).items() if key != "learner_notes"}
+    if isinstance(public.get("lesson_preparation"), dict):
+        public["lesson_preparation"] = {
+            key: value
+            for key, value in public["lesson_preparation"].items()
+            if key != "teaching_notes"
+        }
+    return public
+
+
 def _hash_password(password: str, salt: bytes | None = None) -> str:
     salt = salt or secrets.token_bytes(16)
     digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
@@ -1182,7 +1198,7 @@ async def tutor_messages(project_id: UUID, session: SessionDep):
             "canonical_message": message.canonical_text,
             "language": message.language,
             "action": message.action,
-            "metadata": message.metadata_json,
+            "metadata": _public_metadata(message.metadata_json),
             "created_at": message.created_at,
         }
 
