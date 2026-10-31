@@ -1651,12 +1651,22 @@ async def edit_range(
         plan = EditPlan.decode(instruction, in_range)
         if not plan.edits and not plan.pronunciations:
             raise ValueError("the edit names no scene of this video")
+        if not localization_only:
+            # Starts this edit's progress, so earlier jobs' steps are not shown as its own.
+            await record_event(
+                session,
+                project_id,
+                "edit.started",
+                detail={"scenes": sorted({edit.scene for edit in plan.edits if edit.scene})},
+            )
+            await session.commit()
         runtime = create_pipeline(
             settings,
             session,
             narration_profile=await _narration_profile(session, project_id, settings),
             text_language=project.text_language,
             voice_language=project.voice_language,
+            progress_callback=_build_progress_callback(database, project_id),
         )
         slots: list[_EditSlot] = []
         saved: dict[str, tuple[int, int]] = {}

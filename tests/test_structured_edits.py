@@ -19,6 +19,7 @@ from scholarmotion.persistence.database import Base
 from scholarmotion.persistence.models import (
     AudioArtifact,
     GeneratedCode,
+    ProgressEvent,
     Project,
     ProjectArtifact,
     ProjectRevision,
@@ -441,6 +442,12 @@ async def test_an_edit_rebuilds_only_its_scenes_and_saves_one_new_version(
             select(ProjectRevision).where(ProjectRevision.active.is_(True))
         )
         assert revision.payload["removed_scenes"] == ["S02"]
+        # The edit's progress starts with the scenes it touches, so the panel shows
+        # this edit's steps and never an earlier job's.
+        started = await session.scalar(
+            select(ProgressEvent).where(ProgressEvent.event == "edit.started")
+        )
+        assert started.detail == {"scenes": ["S01", "S02", "S03"]}
 
         # Undo: version 1 comes back with its three scenes in their old order.
         project_row = await session.get(Project, project.id)

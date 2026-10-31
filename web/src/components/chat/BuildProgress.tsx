@@ -32,6 +32,7 @@ const LABELS: Record<string, string> = {
   "video.complete": "Your video is ready",
   "localization.started": "Preparing the translated lesson",
   "localization.complete": "The translated lesson is ready",
+  "edit.started": "Preparing your changes",
 };
 
 const SCENE_STAGE: Record<string, number> = {
@@ -62,6 +63,7 @@ const MILESTONES: Record<string, number> = {
   "video.complete": 1,
   "localization.started": 0.05,
   "localization.complete": 1,
+  "edit.started": 0.05,
 };
 
 const REPAIR: Record<string, string> = {
@@ -184,7 +186,10 @@ function measure(progress: Progress) {
   if (name === "scene.rejected" && latest) label = describe(latest) ?? label;
   let value = MILESTONES[name];
   if (value === undefined && (name.startsWith("scene.") || name.startsWith("narration."))) {
-    const planned = [...current].reverse().find((event) => event.event === "scenes.created")?.detail?.scene_count;
+    // An edit rebuilds only its own scenes, not the whole video.
+    const planned =
+      [...current].reverse().find((event) => event.event === "scenes.created")?.detail?.scene_count ??
+      current.find((event) => event.event === "edit.started")?.detail?.scenes?.length;
     const count = Math.max(Number(planned || progress.scene_count || 0), 1);
     const stages: Record<string, number> = {};
     for (const event of current) {
